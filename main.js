@@ -25,6 +25,13 @@ const CONFIG = {
   }
 };
 
+// ============ POWER-UPS ============
+const POWERUP_TYPES = [
+  { id: 'WALL_REPAIR', name: 'Repair', color: '#4ecdc4', icon: '♥' },
+  { id: 'SORTIE',      name: 'Sortie', color: '#e67e22', icon: '⚔' },
+  { id: 'FIRE_BOLTS',  name: 'Fire',   color: '#e74c3c', icon: '🔥' },
+];
+
 // ============ GAME STATE ============
 const state = {
   screen: 'TITLE',
@@ -33,10 +40,16 @@ const state = {
   waveEnemiesTotal: 0, waveEnemiesRemaining: 0, waveDamage: 0,
   entities: [], bolts: [], particles: [], popups: [],
   ballistae: [], powerUps: [null, null, null], collectibles: [],
+  defenders: [],
+  awardedPowerupLevels: [],
+  pendingPowerupTimer: -1,
+  repairSweepX: -1,
   shake: { x: 0, y: 0, intensity: 0, duration: 0 },
   ambientParticles: [], sparkles: [], sparkleTimer: 0.7, wallFlash: 0,
   time: 0, deltaTime: 0, lastTime: 0,
   firstPlay: true, paused: false, fireBoltsTimer: 0,
+  briefingPage: 0,
+  callsign: '',
 };
 
 // ============ CANVAS SETUP ============
@@ -157,6 +170,30 @@ function getGameCoords(clientX, clientY) {
 }
 
 function handleGameplayTap(x, y) {
+  // Collectible pickup
+  for (let i = 0; i < state.collectibles.length; i++) {
+    const c = state.collectibles[i];
+    if (Math.hypot(x - c.x, y - c.y) < 30) {
+      const slot = state.powerUps.findIndex(p => !p);
+      if (slot !== -1 && !state.powerUps.some(p => p && p.id === c.type.id)) {
+        state.powerUps[slot] = c.type;
+        spawnImpactBurst(c.x, c.y, [c.type.color, '#ffffff'], 14);
+      }
+      state.collectibles.splice(i, 1);
+      return;
+    }
+  }
+
+  // Power-up rail tap
+  for (let i = 0; i < 3; i++) {
+    const px = gameWidth - 50;
+    const py = 80 + i * 50;
+    if (x >= px && x <= px + 40 && y >= py && y <= py + 40 && state.powerUps[i]) {
+      activatePowerUp(i);
+      return;
+    }
+  }
+
   let nearest = null;
   let bestDist = Infinity;
   for (const entity of state.entities) {
@@ -180,8 +217,25 @@ function handleInput(clientX, clientY) {
 
   switch (state.screen) {
     case 'TITLE':
-      state.firstPlay = false;
-      startGame();
+      if (state.firstPlay) {
+        state.briefingPage = 0;
+        state.screen = 'BRIEFING';
+      } else {
+        startGame();
+      }
+      break;
+    case 'BRIEFING':
+      if (x < gameWidth * 0.4) {
+        state.firstPlay = false;
+        startGame();
+      } else {
+        if (state.briefingPage >= BRIEFING_PAGES.length - 1) {
+          state.firstPlay = false;
+          startGame();
+        } else {
+          state.briefingPage += 1;
+        }
+      }
       break;
     case 'LEVEL_UP':
     case 'BOSS_WARNING':
@@ -192,21 +246,13 @@ function handleInput(clientX, clientY) {
         spawnWave();
       }
       state.screen = 'PLAYING';
+      // Reward a power-up every 3rd level (during the upcoming wave)
+      if (state.level % 3 === 0 && !state.awardedPowerupLevels.includes(state.level)) {
+        state.pendingPowerupTimer = 1.5;
+      }
       break;
     case 'GAME_OVER':
-      state.screen = 'TITLE';
-      state.entities = [];
-      state.bolts = [];
-      state.particles = [];
-      state.popups = [];
-      state.sparkles = [];
-      state.collectibles = [];
-      state.wallFlash = 0;
-      state.shake.x = 0; state.shake.y = 0; state.shake.intensity = 0; state.shake.duration = 0;
-      waveSpawnQueue = [];
-      waveSpawnTimer = 0;
-      betweenWaves = false;
-      betweenWaveTimer = 0;
+      handleGameOverTap(x, y);
       break;
     case 'PAUSED':
       state.screen = 'PLAYING';
@@ -216,6 +262,56 @@ function handleInput(clientX, clientY) {
       handleGameplayTap(x, y);
       break;
   }
+}
+
+function resetToTitle() {
+  state.screen = 'TITLE';
+  state.entities = [];
+  state.bolts = [];
+  state.particles = [];
+  state.popups = [];
+  state.sparkles = [];
+  state.collectibles = [];
+  state.defenders = [];
+  state.powerUps = [null, null, null];
+  state.awardedPowerupLevels = [];
+  state.pendingPowerupTimer = -1;
+  state.fireBoltsTimer = 0;
+  state.repairSweepX = -1;
+  state.wallFlash = 0;
+  state.shake.x = 0; state.shake.y = 0; state.shake.intensity = 0; state.shake.duration = 0;
+  waveSpawnQueue = [];
+  waveSpawnTimer = 0;
+  betweenWaves = false;
+  betweenWaveTimer = 0;
+}
+
+function handleGameOverTap(x, y) {
+  const b = gameOverButtons();
+  if (b.callsign && pointInRect(x, y, b.callsign)) {
+    const name = prompt('Enter your callsign:', state.callsign || '');
+    if (name) {
+      state.callsign = name.replace(/[^a-zA-Z0-9 ]/g, '').trim().substring(0, 20);
+    }
+    return;
+  }
+  if (b.share && pointInRect(x, y, b.share)) {
+    const text = `I defended Palmyra to Level ${state.level} with ${state.score.toLocaleString()} points! Can you beat me? 🏛️ Play: https://palmyra.anmol.be`;
+    window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+    return;
+  }
+  if (b.again && pointInRect(x, y, b.again)) {
+    startGame();
+    return;
+  }
+  if (b.menu && pointInRect(x, y, b.menu)) {
+    resetToTitle();
+    return;
+  }
+}
+
+function pointInRect(x, y, r) {
+  return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
 }
 
 // ============ ENTITIES ============
@@ -1200,6 +1296,12 @@ function startGame() {
   state.sparkles = [];
   state.sparkleTimer = 0.7;
   state.collectibles = [];
+  state.defenders = [];
+  state.powerUps = [null, null, null];
+  state.awardedPowerupLevels = [];
+  state.pendingPowerupTimer = -1;
+  state.fireBoltsTimer = 0;
+  state.repairSweepX = -1;
   state.wallFlash = 0;
   state.shake.x = 0; state.shake.y = 0; state.shake.intensity = 0; state.shake.duration = 0;
   waveSpawnQueue = [];
@@ -1279,6 +1381,55 @@ function updateEntities(dt) {
   state.entities = state.entities.filter(e => e.alive);
 }
 
+function applyHitToEntity(entity, impactX, impactY) {
+  entity.hp -= 1;
+  entity.flashTimer = 0.05;
+
+  if (entity.hp > 0) {
+    if (entity.type === 'testudo') {
+      generateCrack(entity);
+      triggerShake(2, 0.1);
+      spawnImpactBurst(impactX, impactY, entityKillColors('testudo'), 6);
+    } else if (entity.type === 'siegeTower') {
+      entity.scorchMarks.push({
+        x: Math.random() * 50 + 10,
+        y: Math.random() * 60 + 15,
+        r: 5 + Math.random() * 8,
+      });
+      if (entity.hp <= 2) entity.smoking = true;
+      triggerShake(3, 0.15);
+      spawnImpactBurst(impactX, impactY, entityKillColors('siegeTower'), 8);
+      spawnSmoke(entity.x, entity.y - entity.height * 0.3);
+    }
+  }
+
+  if (entity.hp <= 0) {
+    entity.crumbling = true;
+    entity.crumbleTimer = entity.type === 'siegeTower' ? 0.4 : 0.3;
+
+    const baseScore = scoreForType(entity.type);
+    const earned = baseScore * state.multiplier;
+    state.score += earned;
+    state.consecutiveKills += 1;
+    if (state.consecutiveKills % 3 === 0 && state.multiplier < 5) {
+      state.multiplier += 1;
+    }
+
+    spawnPopup(`+${earned}`, entity.x, entity.y);
+
+    if (entity.type === 'siegeTower') {
+      spawnImpactBurst(entity.x, entity.y, entityKillColors('siegeTower'), 12);
+      triggerShake(8, 0.3);
+    } else if (entity.type === 'testudo') {
+      spawnImpactBurst(entity.x, entity.y, entityKillColors('testudo'), 10);
+      triggerShake(4, 0.2);
+    } else {
+      spawnImpactBurst(impactX, impactY, entityKillColors('legionary'), 8);
+      triggerShake(2, 0.1);
+    }
+  }
+}
+
 function checkCollisions() {
   // Bolt → Enemy
   for (const bolt of state.bolts) {
@@ -1290,59 +1441,26 @@ function checkCollisions() {
       const d = Math.hypot(bolt.x - entity.x, bolt.y - entity.y);
       if (d < hitRadius) {
         bolt.alive = false;
-        entity.hp -= 1;
-        entity.flashTimer = 0.05;
+        const fire = state.fireBoltsTimer > 0;
 
         // Impact flash circle — small bright dot that swells and fades
         spawnParticle({
-          x: bolt.x, y: bolt.y, size: 1,
-          color: CONFIG.COLORS.FLASH_GOLD,
-          life: 0.2, alpha: 0.8, growRate: 60,
+          x: bolt.x, y: bolt.y, size: fire ? 2 : 1,
+          color: fire ? '#ff6633' : CONFIG.COLORS.FLASH_GOLD,
+          life: 0.2, alpha: 0.8, growRate: fire ? 120 : 60,
         });
 
-        if (entity.hp > 0) {
-          // Hit but not killed
-          if (entity.type === 'testudo') {
-            generateCrack(entity);
-            triggerShake(2, 0.1);
-            spawnImpactBurst(bolt.x, bolt.y, entityKillColors('testudo'), 6);
-          } else if (entity.type === 'siegeTower') {
-            entity.scorchMarks.push({
-              x: Math.random() * 50 + 10,
-              y: Math.random() * 60 + 15,
-              r: 5 + Math.random() * 8,
-            });
-            if (entity.hp <= 2) entity.smoking = true;
-            triggerShake(3, 0.15);
-            spawnImpactBurst(bolt.x, bolt.y, entityKillColors('siegeTower'), 8);
-            spawnSmoke(entity.x, entity.y - entity.height * 0.3);
+        if (fire) {
+          spawnImpactBurst(bolt.x, bolt.y, ['#e74c3c', '#ff6633', '#ffaa33'], 16);
+          // AoE: damage all enemies within 60px of impact (each takes 1 damage independently)
+          for (const other of state.entities) {
+            if (!other.alive || other.crumbling) continue;
+            if (Math.hypot(bolt.x - other.x, bolt.y - other.y) < 60) {
+              applyHitToEntity(other, bolt.x, bolt.y);
+            }
           }
-        }
-
-        if (entity.hp <= 0) {
-          entity.crumbling = true;
-          entity.crumbleTimer = entity.type === 'siegeTower' ? 0.4 : 0.3;
-
-          const baseScore = scoreForType(entity.type);
-          const earned = baseScore * state.multiplier;
-          state.score += earned;
-          state.consecutiveKills += 1;
-          if (state.consecutiveKills % 3 === 0 && state.multiplier < 5) {
-            state.multiplier += 1;
-          }
-
-          spawnPopup(`+${earned}`, entity.x, entity.y);
-
-          if (entity.type === 'siegeTower') {
-            spawnImpactBurst(entity.x, entity.y, entityKillColors('siegeTower'), 12);
-            triggerShake(8, 0.3);
-          } else if (entity.type === 'testudo') {
-            spawnImpactBurst(entity.x, entity.y, entityKillColors('testudo'), 10);
-            triggerShake(4, 0.2);
-          } else {
-            spawnImpactBurst(bolt.x, bolt.y, entityKillColors('legionary'), 8);
-            triggerShake(2, 0.1);
-          }
+        } else {
+          applyHitToEntity(entity, bolt.x, bolt.y);
         }
         break;
       }
@@ -1450,27 +1568,390 @@ function renderHUD(ctx) {
     ctx.fillText('♥', x, 16);
   }
 
-  // Power-up rail — 3 outlined slots stacked at the right edge (Prompt 7 stub)
-  ctx.save();
-  ctx.globalAlpha = 0.20;
-  ctx.strokeStyle = CONFIG.COLORS.UI_TEXT;
-  ctx.lineWidth = 1.5;
+  // Power-up rail — 3 slots stacked at the right edge
   for (let i = 0; i < 3; i++) {
     const px = gameWidth - 50;
     const py = 80 + i * 50;
-    if (ctx.roundRect) {
+    const power = state.powerUps[i];
+
+    if (power) {
+      // Filled slot with pulsing glow
+      const pulse = 0.7 + 0.3 * Math.sin(state.time / 250 + i);
+
+      ctx.save();
+      ctx.globalAlpha = pulse * 0.3;
+      ctx.fillStyle = power.color;
       ctx.beginPath();
-      ctx.roundRect(px, py, 40, 40, 6);
-      ctx.stroke();
+      ctx.arc(px + 20, py + 20, 28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.fillStyle = power.color;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(px, py, 40, 40, 6);
+        ctx.fill();
+      } else {
+        ctx.fillRect(px, py, 40, 40);
+      }
+      ctx.restore();
+
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '20px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(power.icon, px + 20, py + 21);
+      ctx.restore();
     } else {
-      ctx.strokeRect(px, py, 40, 40);
+      // Empty slot — dim outlined
+      ctx.save();
+      ctx.globalAlpha = 0.15;
+      ctx.strokeStyle = CONFIG.COLORS.UI_TEXT;
+      ctx.lineWidth = 1.5;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(px, py, 40, 40, 6);
+        ctx.stroke();
+      } else {
+        ctx.strokeRect(px, py, 40, 40);
+      }
+      ctx.restore();
     }
   }
-  ctx.restore();
+
+  // Fire-bolts countdown bar below the rail
+  if (state.fireBoltsTimer > 0) {
+    const barX = gameWidth - 50;
+    const barY = 80 + 3 * 50 + 4;
+    const barW = 40;
+    const barH = 4;
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = '#3a1a0a';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.restore();
+    ctx.fillStyle = '#e74c3c';
+    ctx.fillRect(barX, barY, barW * (state.fireBoltsTimer / 10), barH);
+  }
 }
 
 // ============ POWER-UPS ============
-// TODO Prompt 7
+
+function spawnPowerUpCollectible() {
+  const held = state.powerUps.filter(p => p).map(p => p.id);
+  const available = POWERUP_TYPES.filter(t => !held.includes(t.id));
+  if (available.length === 0) return;
+  const type = available[Math.floor(Math.random() * available.length)];
+
+  state.collectibles.push({
+    type: type,
+    x: -40,
+    y: 60 + Math.random() * Math.max(40, wallY * 0.25),
+    speed: 50 + Math.random() * 30,
+    alive: true,
+    glowPhase: 0,
+    lifetime: 10,
+  });
+}
+
+function updateCollectibles(dt) {
+  for (let i = state.collectibles.length - 1; i >= 0; i--) {
+    const c = state.collectibles[i];
+    c.x += c.speed * dt;
+    c.glowPhase += dt * 4;
+    c.lifetime -= dt;
+    if (c.x > gameWidth + 40 || c.lifetime <= 0) {
+      state.collectibles.splice(i, 1);
+    }
+  }
+}
+
+function renderCollectibles(ctx) {
+  for (const c of state.collectibles) {
+    const pulse = 0.6 + 0.3 * Math.sin(c.glowPhase);
+
+    // Glow halo
+    ctx.save();
+    ctx.globalAlpha = pulse * 0.35;
+    ctx.fillStyle = c.type.color;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 30, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Body
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    ctx.fillStyle = c.type.color;
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(c.x - 18, c.y - 18, 36, 36, 8);
+      ctx.fill();
+    } else {
+      ctx.fillRect(c.x - 18, c.y - 18, 36, 36);
+    }
+    ctx.restore();
+
+    // Icon
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '18px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(c.type.icon, c.x, c.y);
+    ctx.restore();
+  }
+}
+
+function activatePowerUp(slotIndex) {
+  const power = state.powerUps[slotIndex];
+  if (!power) return;
+  state.powerUps[slotIndex] = null;
+
+  if (power.id === 'WALL_REPAIR') {
+    state.hearts = Math.min(state.hearts + 2, CONFIG.MAX_HEARTS);
+    state.repairSweepX = 0;
+    spawnPopup('+2 ♥', gameWidth / 2, wallY - 30);
+  } else if (power.id === 'SORTIE') {
+    for (let i = 0; i < 5; i++) {
+      const x = gameWidth * (0.2 + (i / 4) * 0.6) + (Math.random() - 0.5) * 30;
+      state.defenders.push(createDefender(x));
+    }
+    spawnPopup('SORTIE!', gameWidth / 2, wallY - 30);
+  } else if (power.id === 'FIRE_BOLTS') {
+    state.fireBoltsTimer = 10;
+    spawnPopup('FIRE BOLTS!', gameWidth / 2, wallY - 30);
+  }
+}
+
+function createDefender(x) {
+  return {
+    type: 'defender',
+    x: x,
+    y: wallY - 10,
+    speed: 200,
+    target: null,
+    alive: true,
+    lifetime: 8,
+    width: 20,
+    height: 25,
+  };
+}
+
+function updateDefenders(dt) {
+  for (let i = state.defenders.length - 1; i >= 0; i--) {
+    const d = state.defenders[i];
+    d.lifetime -= dt;
+    if (d.lifetime <= 0) {
+      state.defenders.splice(i, 1);
+      continue;
+    }
+
+    // Pick the nearest live enemy
+    let nearest = null;
+    let bestDist = Infinity;
+    for (const e of state.entities) {
+      if (!e.alive || e.crumbling) continue;
+      const dist = Math.hypot(e.x - d.x, e.y - d.y);
+      if (dist < bestDist) { bestDist = dist; nearest = e; }
+    }
+
+    if (nearest) {
+      const dx = nearest.x - d.x;
+      const dy = nearest.y - d.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      d.x += (dx / dist) * d.speed * dt;
+      d.y += (dy / dist) * d.speed * dt;
+
+      if (dist < 20) {
+        nearest.hp -= 1;
+        nearest.flashTimer = 0.05;
+        spawnImpactBurst(d.x, d.y, ['#ffe6a8', CONFIG.COLORS.GOLD], 8);
+        if (nearest.hp <= 0) {
+          nearest.crumbling = true;
+          nearest.crumbleTimer = nearest.type === 'siegeTower' ? 0.4 : 0.3;
+          const earned = scoreForType(nearest.type) * state.multiplier;
+          state.score += earned;
+          spawnPopup(`+${earned}`, nearest.x, nearest.y);
+        }
+        state.defenders.splice(i, 1);
+      }
+    } else {
+      // Walk forward if no enemy
+      d.y -= d.speed * dt * 0.5;
+      if (d.y < -30) state.defenders.splice(i, 1);
+    }
+  }
+}
+
+function renderDefenders(ctx) {
+  for (const d of state.defenders) {
+    if (SPRITES.defender) {
+      ctx.drawImage(SPRITES.defender, d.x - d.width / 2, d.y - d.height / 2, d.width, d.height);
+      continue;
+    }
+
+    ctx.save();
+    ctx.translate(d.x, d.y);
+
+    // Shadow
+    ctx.fillStyle = CONFIG.COLORS.SHADOW;
+    ctx.beginPath();
+    ctx.ellipse(0, 9, 7, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Helmet — cream/tan
+    ctx.fillStyle = '#e8d59a';
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff2c8';
+    ctx.beginPath();
+    ctx.arc(-1, -1.2, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Lighter shield
+    ctx.fillStyle = '#c8d8a8';
+    ctx.fillRect(4, -3, 6, 10);
+    ctx.fillStyle = CONFIG.COLORS.GOLD;
+    ctx.fillRect(7, -1, 0.8, 6);
+
+    // Spear pointing up
+    ctx.strokeStyle = '#9a9a9a';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-4, 0);
+    ctx.lineTo(-4, -10);
+    ctx.stroke();
+    // Spear tip
+    ctx.fillStyle = '#cccccc';
+    ctx.beginPath();
+    ctx.moveTo(-4, -12);
+    ctx.lineTo(-6, -9);
+    ctx.lineTo(-2, -9);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+function updatePowerUpsState(dt) {
+  // Pending power-up reward spawn
+  if (state.pendingPowerupTimer > 0) {
+    state.pendingPowerupTimer -= dt;
+    if (state.pendingPowerupTimer <= 0) {
+      spawnPowerUpCollectible();
+      state.awardedPowerupLevels.push(state.level);
+      state.pendingPowerupTimer = -1;
+    }
+  }
+
+  if (state.fireBoltsTimer > 0) {
+    state.fireBoltsTimer = Math.max(0, state.fireBoltsTimer - dt);
+  }
+
+  if (state.repairSweepX >= 0) {
+    state.repairSweepX += gameWidth / 0.5 * dt;
+    if (state.repairSweepX > gameWidth) state.repairSweepX = -1;
+  }
+}
+
+function renderRepairSweep(ctx) {
+  if (state.repairSweepX < 0) return;
+  ctx.save();
+  const grad = ctx.createLinearGradient(state.repairSweepX - 30, 0, state.repairSweepX + 30, 0);
+  grad.addColorStop(0, 'rgba(255,215,0,0)');
+  grad.addColorStop(0.5, 'rgba(255,235,150,0.85)');
+  grad.addColorStop(1, 'rgba(255,215,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(state.repairSweepX - 30, wallY - 12, 60, wallHeight + 12);
+  ctx.restore();
+}
+
+// ============ BRIEFING ============
+const BRIEFING_PAGES = [
+  { subtitle: 'YOUR WEAPONS',       title: 'THE BALLISTAE',  body: 'Tap any enemy to fire. Your wall-mounted ballistae do the rest. The closer the enemy, the less time you have.', color: '#daa520' },
+  { subtitle: 'KNOW YOUR ENEMY',    title: 'THE LEGIONS',    body: 'Roman soldiers march in squads — one hit destroys them. Shield formations require multiple strikes to break through.', color: '#b5452a' },
+  { subtitle: 'ENEMY SIEGE REPORT', title: 'THREAT WARNING', body: 'Every 5 waves, a siege tower approaches. These armored giants require multiple direct hits. Prepare the ballistae.', color: '#e67e22' },
+  { subtitle: 'MISSION OBJECTIVE',  title: 'DEFEND PALMYRA', body: 'The desert wind carries the sound of Roman drums. Man the ballistae. Stop every Roman. Leave nothing to chance.', color: '#4ecdc4' },
+];
+
+function renderBriefing(ctx) {
+  ctx.fillStyle = '#1a0a04';
+  ctx.fillRect(0, 0, gameWidth, gameHeight);
+
+  const page = BRIEFING_PAGES[state.briefingPage];
+  const cx = gameWidth / 2;
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Page dots near top
+  const dotsY = gameHeight * 0.15;
+  const dotSpacing = 18;
+  const dotsTotal = BRIEFING_PAGES.length;
+  const dotsStartX = cx - ((dotsTotal - 1) * dotSpacing) / 2;
+  for (let i = 0; i < dotsTotal; i++) {
+    ctx.beginPath();
+    ctx.arc(dotsStartX + i * dotSpacing, dotsY, 5, 0, Math.PI * 2);
+    if (i === state.briefingPage) {
+      ctx.fillStyle = page.color;
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = page.color;
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Subtitle
+  ctx.fillStyle = page.color;
+  ctx.font = '14px monospace';
+  ctx.fillText(page.subtitle, cx, gameHeight * 0.3);
+
+  // Title
+  ctx.font = 'bold 32px monospace';
+  ctx.fillText(page.title, cx, gameHeight * 0.38);
+
+  // Decorative line
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = page.color;
+  ctx.fillRect(cx - 40, gameHeight * 0.42, 80, 2);
+  ctx.restore();
+
+  // Body
+  ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
+  ctx.font = '16px serif';
+  const lines = wrapText(ctx, page.body, gameWidth * 0.7);
+  let by = gameHeight * 0.48;
+  for (const line of lines) {
+    ctx.fillText(line, cx, by);
+    by += 22;
+  }
+
+  // Buttons at bottom
+  const btnY = gameHeight * 0.78;
+  const isLast = state.briefingPage >= BRIEFING_PAGES.length - 1;
+
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
+  ctx.font = '16px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('SKIP', gameWidth * 0.15, btnY);
+  ctx.restore();
+
+  ctx.fillStyle = page.color;
+  ctx.font = isLast ? 'bold 18px monospace' : 'bold 16px monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText(isLast ? '⚡ LAUNCH DEFENSE' : 'NEXT →', gameWidth * 0.85, btnY);
+}
 
 // ============ AUDIO ============
 // TODO Prompt 8
@@ -1577,6 +2058,11 @@ function updateBolts(dt) {
 }
 
 function renderBolts(ctx) {
+  const fire = state.fireBoltsTimer > 0;
+  const trailColor = fire ? '#ff5522' : CONFIG.COLORS.BOLT_GOLD;
+  const bodyColor  = fire ? '#ff8833' : CONFIG.COLORS.BOLT_GOLD;
+  const dotColor   = fire ? '#ffdd33' : CONFIG.COLORS.FLASH_GOLD;
+
   for (const bolt of state.bolts) {
     const dx = bolt.targetX - bolt.x;
     const dy = bolt.targetY - bolt.y;
@@ -1586,7 +2072,7 @@ function renderBolts(ctx) {
 
     // Trail: oldest → newest, fading & narrowing
     ctx.lineCap = 'round';
-    ctx.strokeStyle = CONFIG.COLORS.BOLT_GOLD;
+    ctx.strokeStyle = trailColor;
     for (let i = 0; i < bolt.trail.length - 1; i++) {
       const a = bolt.trail[i];
       const b = bolt.trail[i + 1];
@@ -1614,7 +2100,7 @@ function renderBolts(ctx) {
     // Arrowhead at tip
     const perpX = -dirY;
     const perpY = dirX;
-    ctx.fillStyle = CONFIG.COLORS.BOLT_GOLD;
+    ctx.fillStyle = bodyColor;
     ctx.beginPath();
     ctx.moveTo(tipX + dirX * 4, tipY + dirY * 4);
     ctx.lineTo(tipX + perpX * 3, tipY + perpY * 3);
@@ -1623,7 +2109,7 @@ function renderBolts(ctx) {
     ctx.fill();
 
     // Bright dot for visibility
-    ctx.fillStyle = CONFIG.COLORS.FLASH_GOLD;
+    ctx.fillStyle = dotColor;
     ctx.beginPath();
     ctx.arc(bolt.x, bolt.y, 2, 0, Math.PI * 2);
     ctx.fill();
@@ -1772,6 +2258,31 @@ function renderBossWarning(ctx) {
 
 function renderPaused(ctx)     { renderOverlayPlaceholder(ctx, 'PAUSED — tap to resume'); }
 
+function gameOverButtons() {
+  const cx = gameWidth / 2;
+  const cy = gameHeight / 2;
+  const inputW = 250, inputH = 36;
+  const shareW = Math.min(gameWidth * 0.7, 360), shareH = 44;
+  const btnW = (shareW - 12) / 2, btnH = 40;
+
+  return {
+    callsign: { x: cx - inputW / 2, y: cy + 70,  w: inputW, h: inputH },
+    share:    { x: cx - shareW / 2, y: cy + 122, w: shareW, h: shareH },
+    again:    { x: cx - shareW / 2,        y: cy + 178, w: btnW,  h: btnH },
+    menu:     { x: cx - shareW / 2 + btnW + 12, y: cy + 178, w: btnW,  h: btnH },
+  };
+}
+
+function drawRoundedRect(ctx, x, y, w, h, r) {
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+  } else {
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+  }
+}
+
 function renderGameOver(ctx) {
   ctx.fillStyle = 'rgba(20, 10, 4, 0.85)';
   ctx.fillRect(0, 0, gameWidth, gameHeight);
@@ -1783,24 +2294,78 @@ function renderGameOver(ctx) {
   const cy = gameHeight / 2;
 
   ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
-  ctx.font = 'bold 48px serif';
-  ctx.fillText('GAME OVER', cx, cy - 90);
+  ctx.font = 'bold 44px serif';
+  ctx.fillText('GAME OVER', cx, cy - 130);
 
   ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
-  ctx.fillRect(cx - 60, cy - 60, 120, 2);
+  ctx.fillRect(cx - 60, cy - 102, 120, 2);
 
+  // Battle report
   ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
-  ctx.font = '22px monospace';
-  ctx.fillText(`Score    ${state.score.toLocaleString()}`, cx, cy - 20);
-  ctx.fillText(`Level    ${state.level}`, cx, cy + 14);
-  ctx.fillText(`Best     ${state.bestScore.toLocaleString()}`, cx, cy + 48);
+  ctx.font = '20px monospace';
+  ctx.fillText(`Score    ${state.score.toLocaleString()}`, cx, cy - 60);
+  ctx.fillText(`Level    ${state.level}`, cx, cy - 32);
+  ctx.fillText(`Best     ${state.bestScore.toLocaleString()}`, cx, cy - 4);
 
-  const pulse = 0.5 + 0.5 * Math.sin(state.time / 400);
-  ctx.globalAlpha = 0.4 + 0.6 * pulse;
+  const b = gameOverButtons();
+
+  // Callsign label
+  ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
+  ctx.font = '14px monospace';
+  ctx.fillText('YOUR CALLSIGN', cx, b.callsign.y - 14);
+
+  // Callsign input rect
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  drawRoundedRect(ctx, b.callsign.x, b.callsign.y, b.callsign.w, b.callsign.h, 8);
+  ctx.fill();
+  ctx.strokeStyle = CONFIG.COLORS.UI_TEXT;
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = 1.5;
+  drawRoundedRect(ctx, b.callsign.x, b.callsign.y, b.callsign.w, b.callsign.h, 8);
+  ctx.stroke();
+  ctx.restore();
+
+  if (state.callsign) {
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '16px monospace';
+    ctx.fillText(`${state.callsign} ✓`, cx, b.callsign.y + b.callsign.h / 2);
+  } else {
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
+    ctx.font = '14px monospace';
+    ctx.fillText('Tap to enter…', cx, b.callsign.y + b.callsign.h / 2);
+    ctx.restore();
+  }
+
+  // WhatsApp share button
+  ctx.fillStyle = '#25D366';
+  drawRoundedRect(ctx, b.share.x, b.share.y, b.share.w, b.share.h, 10);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText('Share on WhatsApp 💬', cx, b.share.y + b.share.h / 2);
+
+  // Play Again
+  ctx.fillStyle = '#4ecdc4';
+  drawRoundedRect(ctx, b.again.x, b.again.y, b.again.w, b.again.h, 8);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText('PLAY AGAIN', b.again.x + b.again.w / 2, b.again.y + b.again.h / 2);
+
+  // Main Menu
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = CONFIG.COLORS.UI_TEXT;
+  ctx.lineWidth = 1.5;
+  drawRoundedRect(ctx, b.menu.x, b.menu.y, b.menu.w, b.menu.h, 8);
+  ctx.stroke();
   ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
-  ctx.font = '20px serif';
-  ctx.fillText('TAP TO CONTINUE', cx, cy + 110);
-  ctx.globalAlpha = 1;
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText('MAIN MENU', b.menu.x + b.menu.w / 2, b.menu.y + b.menu.h / 2);
+  ctx.restore();
 }
 
 function renderPlaying(ctx) {
@@ -1815,10 +2380,13 @@ function renderPlaying(ctx) {
   renderSparkles(ctx);
   renderShadows(ctx);
   renderEntities(ctx);
+  renderDefenders(ctx);
   renderBolts(ctx);
   renderParticles(ctx);
+  renderCollectibles(ctx);
   renderWall(ctx);
   renderWallFlash(ctx);
+  renderRepairSweep(ctx);
   for (const b of state.ballistae) renderBallista(ctx, b);
   renderPopups(ctx);
 
@@ -1839,6 +2407,7 @@ function update(dt) {
     updateBallistae(dt);
     updateBolts(dt);
     updateEntities(dt);
+    updateDefenders(dtSec);
     checkCollisions();
     updateWaveState(dt);
     updateDustTrails(dtSec);
@@ -1846,6 +2415,8 @@ function update(dt) {
     updateParticles(dtSec);
     updatePopups(dtSec);
     updateSparkles(dtSec);
+    updateCollectibles(dtSec);
+    updatePowerUpsState(dtSec);
     if (state.wallFlash > 0) {
       state.wallFlash = Math.max(0, state.wallFlash - dtSec);
     }
@@ -1858,6 +2429,7 @@ function render() {
 
   switch (state.screen) {
     case 'TITLE':         renderTitle(ctx); break;
+    case 'BRIEFING':      renderBriefing(ctx); break;
     case 'PLAYING':       renderPlaying(ctx); break;
     case 'LEVEL_UP':      renderPlaying(ctx); renderLevelUp(ctx); break;
     case 'BOSS_WARNING':  renderPlaying(ctx); renderBossWarning(ctx); break;
