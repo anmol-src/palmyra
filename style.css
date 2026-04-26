@@ -23,6 +23,6 @@ html, body {
   -ms-touch-action: none;
   -webkit-user-select: none;
   user-select: none;
-  cursor: crosshair;
+  cursor: none;
   background: #1a0a04;
 }

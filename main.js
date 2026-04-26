@@ -5,8 +5,8 @@ const CONFIG = {
   BALLISTA_COOLDOWN: 400,
   BOLT_SPEED: 2500,
   LEGIONARY_SPEED: 140, LEGIONARY_HP: 1, LEGIONARY_SQUAD_SIZE: 5,
-  TESTUDO_SPEED: 80, TESTUDO_HP: 3, TESTUDO_WIDTH: 60, TESTUDO_HEIGHT: 48,
-  SIEGE_TOWER_SPEED: 55, SIEGE_TOWER_HP: 5, SIEGE_TOWER_WIDTH: 70, SIEGE_TOWER_HEIGHT: 90,
+  TESTUDO_SPEED: 80, TESTUDO_HP: 3, TESTUDO_WIDTH: 140, TESTUDO_HEIGHT: 110,
+  SIEGE_TOWER_SPEED: 55, SIEGE_TOWER_HP: 5, SIEGE_TOWER_WIDTH: 120, SIEGE_TOWER_HEIGHT: 160,
   LEGIONARY_SCORE: 100, TESTUDO_SCORE: 300, SIEGE_TOWER_SCORE: 500,
   PERFECT_WAVE_BONUS: 200, BOSS_CLEAR_BONUS: 1000,
   BOB_AMPLITUDE: 2.5, BOB_FREQUENCY: 6, DUST_INTERVAL: 100,
@@ -14,7 +14,7 @@ const CONFIG = {
   WAVES_PER_LEVEL: 10, WAVE_PAUSE: 2000, MAX_LEVEL: 50, BOSS_INTERVAL: 5,
   TAP_RADIUS_MULTIPLIER: 1.2,
   COLORS: {
-    GROUND: '#e8dcc8', GROUND_DARK: '#d4c4a8',
+    GROUND: '#c4a87c', GROUND_DARK: '#a8884a',
     WALL_STONE: '#c4a87c', WALL_DARK: '#8a7560', WALL_BRICK: '#a08060',
     SHIELD_RED: '#b5452a', GOLD: '#c4a035',
     BOLT_GOLD: '#daa520', FLASH_GOLD: '#ffd700',
@@ -62,6 +62,8 @@ let canvas, ctx;
 let gameWidth, gameHeight;
 let wallY;
 let wallHeight, walkwayHeight;
+let mouseX = -100, mouseY = -100;
+const isTouchDevice = (typeof window !== 'undefined') && ('ontouchstart' in window);
 const decorations = { dunes: [], ripples: [], rocks: [], buildings: [], palms: [] };
 
 function resize() {
@@ -152,6 +154,17 @@ const SPRITE_FILES = {
   city: 'assets/sprites/city.png',
   defender: 'assets/sprites/defender.png',
   borderFrame: 'assets/sprites/border_frame.png',
+  mosaic_tile: 'assets/sprites/mosaic_tile.png',
+};
+
+// PNGs with white/checkered backgrounds: force the cleaner code-drawn fallback
+const USE_SPRITE = {
+  legionary: false,
+  testudo: false,
+  siegeTower: false,
+  wall: true,
+  city: true,
+  mosaic_tile: true,
 };
 
 function loadImage(src) {
@@ -350,16 +363,16 @@ function createLegionarySquad(x, y, speedMultiplier = 1) {
     x: x,
     y: y,
     soldiers: Array.from({length: CONFIG.LEGIONARY_SQUAD_SIZE}, () => ({
-      offsetX: (Math.random() - 0.5) * 16,
-      offsetY: (Math.random() - 0.5) * 12,
+      offsetX: (Math.random() - 0.5) * 50,
+      offsetY: (Math.random() - 0.5) * 40,
       bobPhase: Math.random() * Math.PI * 2,
       renderOffsetY: 0,
     })),
     hp: CONFIG.LEGIONARY_HP,
     speed: CONFIG.LEGIONARY_SPEED * speedMultiplier,
     alive: true,
-    width: 40,
-    height: 35,
+    width: 100,
+    height: 90,
     flashTimer: 0,
     crumbling: false,
     crumbleTimer: 0.3,
@@ -380,7 +393,7 @@ function renderLegionarySquad(ctx, entity) {
     const sx = entity.x + s.offsetX;
     const sy = entity.y + s.offsetY + (s.renderOffsetY || 0);
 
-    if (SPRITES.legionary) {
+    if (USE_SPRITE.legionary && SPRITES.legionary) {
       const w = entity.width * scale;
       const h = entity.height * scale;
       ctx.save();
@@ -397,42 +410,72 @@ function renderLegionarySquad(ctx, entity) {
     // Soft shadow under the soldier
     ctx.fillStyle = CONFIG.COLORS.SHADOW;
     ctx.beginPath();
-    ctx.ellipse(0, 9, 7, 2.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 14, 12, 4, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Helmet — dark circle with lighter inner highlight
-    ctx.fillStyle = flashing ? '#ffffff' : '#3a2a18';
+    // Body torso hint behind the shield (dark armor)
+    ctx.fillStyle = flashing ? '#ffd0c0' : '#2a1a0a';
+    ctx.fillRect(-3, 1, 6, 8);
+
+    // Helmet — outer dark circle 8px
+    ctx.fillStyle = flashing ? '#ffffff' : '#2a1a0a';
     ctx.beginPath();
-    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.arc(0, 0, 8, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = flashing ? '#ffe6a8' : '#5a4828';
+    // Inner lighter highlight 5px
+    ctx.fillStyle = flashing ? '#ffe6a8' : '#6b5030';
     ctx.beginPath();
-    ctx.arc(-1, -1.2, 2.4, 0, Math.PI * 2);
+    ctx.arc(-1.5, -2, 5, 0, Math.PI * 2);
     ctx.fill();
 
-    // Tiny crest
+    // Red crest line across helmet top, 10px wide
     ctx.strokeStyle = CONFIG.COLORS.CREST_RED;
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(0, -5);
-    ctx.lineTo(0, -8);
+    ctx.moveTo(-5, -7);
+    ctx.lineTo(5, -7);
     ctx.stroke();
 
-    // Shield — red rect with gold trim + boss
+    // Shield — red rounded rect 10×16 with gold trim + boss
     ctx.fillStyle = flashing ? '#ffb0a0' : CONFIG.COLORS.SHIELD_RED;
-    ctx.fillRect(4, -3, 6, 10);
-    ctx.fillStyle = CONFIG.COLORS.GOLD;
-    ctx.fillRect(7, -1, 0.8, 6);
+    const shieldX = 5, shieldY = -4, shieldW = 10, shieldH = 16, shieldR = 2;
     ctx.beginPath();
-    ctx.arc(7.4, 2, 1, 0, Math.PI * 2);
+    ctx.moveTo(shieldX + shieldR, shieldY);
+    ctx.lineTo(shieldX + shieldW - shieldR, shieldY);
+    ctx.quadraticCurveTo(shieldX + shieldW, shieldY, shieldX + shieldW, shieldY + shieldR);
+    ctx.lineTo(shieldX + shieldW, shieldY + shieldH - shieldR);
+    ctx.quadraticCurveTo(shieldX + shieldW, shieldY + shieldH, shieldX + shieldW - shieldR, shieldY + shieldH);
+    ctx.lineTo(shieldX + shieldR, shieldY + shieldH);
+    ctx.quadraticCurveTo(shieldX, shieldY + shieldH, shieldX, shieldY + shieldH - shieldR);
+    ctx.lineTo(shieldX, shieldY + shieldR);
+    ctx.quadraticCurveTo(shieldX, shieldY, shieldX + shieldR, shieldY);
+    ctx.closePath();
+    ctx.fill();
+    // Gold border
+    ctx.strokeStyle = CONFIG.COLORS.GOLD;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // Gold dot center, 2px
+    ctx.fillStyle = CONFIG.COLORS.GOLD;
+    ctx.beginPath();
+    ctx.arc(shieldX + shieldW / 2, shieldY + shieldH / 2, 2, 0, Math.PI * 2);
     ctx.fill();
 
-    // Sword — thin grey line
-    ctx.strokeStyle = '#9a9a9a';
-    ctx.lineWidth = 1;
+    // Sword — 12px silver line with crossguard
+    ctx.strokeStyle = '#c0c0c0';
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(-5, 1);
-    ctx.lineTo(-9, 6);
+    ctx.moveTo(-6, 0);
+    ctx.lineTo(-14, 8);
+    ctx.stroke();
+    // Crossguard 4px, brown
+    ctx.strokeStyle = '#5a3018';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-7.5, -1.5);
+    ctx.lineTo(-4.5, 1.5);
     ctx.stroke();
 
     ctx.restore();
@@ -476,7 +519,7 @@ function renderTestudo(ctx, entity) {
   const x0 = entity.x - w / 2;
   const y0 = entity.y - h / 2;
 
-  if (SPRITES.testudo) {
+  if (USE_SPRITE.testudo && SPRITES.testudo) {
     ctx.save();
     if (flashing) ctx.filter = 'brightness(1.8)';
     ctx.drawImage(SPRITES.testudo, x0, y0, w, h);
@@ -485,8 +528,8 @@ function renderTestudo(ctx, entity) {
       ctx.save();
       ctx.translate(x0, y0);
       ctx.scale(scale, scale);
-      ctx.strokeStyle = '#1a0a04';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#0a0a0a';
+      ctx.lineWidth = 3;
       for (const crack of entity.cracks) {
         ctx.beginPath();
         for (let i = 0; i < crack.length; i++) {
@@ -505,17 +548,17 @@ function renderTestudo(ctx, entity) {
   ctx.save();
   ctx.fillStyle = CONFIG.COLORS.SHADOW;
   ctx.beginPath();
-  ctx.ellipse(entity.x, entity.y + h / 2 + 3, w * 0.45, 4, 0, 0, Math.PI * 2);
+  ctx.ellipse(entity.x, entity.y + h / 2 + 4, w * 0.5, 6, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
-  // Main red shield body
-  ctx.fillStyle = flashing ? '#ffb0a0' : CONFIG.COLORS.SHIELD_RED;
+  // Main red shield body — slightly brighter so gold pops
+  ctx.fillStyle = flashing ? '#ffb0a0' : '#a83030';
   ctx.fillRect(x0, y0, w, h);
 
-  // Dark border
-  ctx.strokeStyle = '#1a0a04';
-  ctx.lineWidth = 2;
+  // Dark outer border, 3px
+  ctx.strokeStyle = '#1a0606';
+  ctx.lineWidth = 3;
   ctx.strokeRect(x0, y0, w, h);
 
   // Grid 3 rows × 5 columns
@@ -528,9 +571,9 @@ function renderTestudo(ctx, entity) {
   const cellW = innerW / cols;
   const cellH = innerH / rows;
 
-  // Dark red separators
-  ctx.strokeStyle = '#7a2a1a';
-  ctx.lineWidth = 1;
+  // Dark red separators (2px)
+  ctx.strokeStyle = '#600000';
+  ctx.lineWidth = 2;
   for (let c = 1; c < cols; c++) {
     ctx.beginPath();
     ctx.moveTo(c * cellW, 0);
@@ -544,30 +587,42 @@ function renderTestudo(ctx, entity) {
     ctx.stroke();
   }
 
-  // Gold cross + dot in each cell
+  // Gold decorations: curved wings + vertical line + center dot
   ctx.strokeStyle = CONFIG.COLORS.GOLD;
   ctx.fillStyle = CONFIG.COLORS.GOLD;
-  ctx.lineWidth = 0.8;
+  ctx.lineWidth = 1.2;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const cx = c * cellW + cellW / 2;
       const cy = r * cellH + cellH / 2;
+      const wingW = cellW * 0.32;
+      const wingH = cellH * 0.18;
+      // Left wing — curved
       ctx.beginPath();
-      ctx.moveTo(cx - cellW * 0.3, cy);
-      ctx.lineTo(cx + cellW * 0.3, cy);
-      ctx.moveTo(cx, cy - cellH * 0.3);
-      ctx.lineTo(cx, cy + cellH * 0.3);
+      ctx.moveTo(cx - wingW, cy + wingH * 0.4);
+      ctx.quadraticCurveTo(cx - wingW * 0.6, cy - wingH, cx, cy);
       ctx.stroke();
+      // Right wing — curved
       ctx.beginPath();
-      ctx.arc(cx, cy, 1, 0, Math.PI * 2);
+      ctx.moveTo(cx + wingW, cy + wingH * 0.4);
+      ctx.quadraticCurveTo(cx + wingW * 0.6, cy - wingH, cx, cy);
+      ctx.stroke();
+      // Vertical line down the middle
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - cellH * 0.25);
+      ctx.lineTo(cx, cy + cellH * 0.32);
+      ctx.stroke();
+      // Center dot, 3px
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
   // Cracks
   if (entity.cracks.length > 0) {
-    ctx.strokeStyle = '#1a0a04';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#0a0a0a';
+    ctx.lineWidth = 3;
     for (const crack of entity.cracks) {
       ctx.beginPath();
       for (let i = 0; i < crack.length; i++) {
@@ -607,7 +662,7 @@ function renderSiegeTower(ctx, entity) {
   const x0 = entity.x - w / 2;
   const y0 = entity.y - h / 2;
 
-  if (SPRITES.siegeTower) {
+  if (USE_SPRITE.siegeTower && SPRITES.siegeTower) {
     ctx.save();
     if (flashing) ctx.filter = 'brightness(1.8)';
     ctx.drawImage(SPRITES.siegeTower, x0, y0, w, h);
@@ -617,15 +672,16 @@ function renderSiegeTower(ctx, entity) {
     ctx.save();
     ctx.fillStyle = CONFIG.COLORS.SHADOW;
     ctx.beginPath();
-    ctx.ellipse(entity.x, entity.y + h / 2 + 4, w * 0.5, 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(entity.x, entity.y + h / 2 + 5, w * 0.55, 7, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
     // Main brown body
-    ctx.fillStyle = flashing ? '#d8b078' : CONFIG.COLORS.WOOD_LIGHT;
+    ctx.fillStyle = flashing ? '#d8b078' : '#5a3018';
     ctx.fillRect(x0, y0, w, h);
-    ctx.strokeStyle = CONFIG.COLORS.WOOD_BROWN;
-    ctx.lineWidth = 2;
+    // Outer dark border, 3px
+    ctx.strokeStyle = '#0a0402';
+    ctx.lineWidth = 3;
     ctx.strokeRect(x0, y0, w, h);
 
     ctx.save();
@@ -634,40 +690,54 @@ function renderSiegeTower(ctx, entity) {
     const iw = entity.width;
     const ih = entity.height;
 
-    // Cross-brace X
-    ctx.strokeStyle = CONFIG.COLORS.WOOD_BROWN;
-    ctx.lineWidth = 1.5;
+    // Wood plank vertical lines every 20px, lighter brown
+    ctx.strokeStyle = '#6b4023';
+    ctx.lineWidth = 1.2;
+    for (let px = 20; px < iw; px += 20) {
+      ctx.beginPath();
+      ctx.moveTo(px, 4);
+      ctx.lineTo(px, ih - 4);
+      ctx.stroke();
+    }
+
+    // Cross-brace X (darker, 2px)
+    ctx.strokeStyle = '#2a1408';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(4, 4); ctx.lineTo(iw - 4, ih - 4);
-    ctx.moveTo(iw - 4, 4); ctx.lineTo(4, ih - 4);
+    ctx.moveTo(6, 6); ctx.lineTo(iw - 6, ih - 6);
+    ctx.moveTo(iw - 6, 6); ctx.lineTo(6, ih - 6);
     ctx.stroke();
 
-    // Platform near top
-    ctx.fillStyle = '#3a1f0a';
-    ctx.fillRect(6, 6, iw - 12, ih * 0.22);
+    // Top platform — darker rect
+    const platH = ih * 0.18;
+    ctx.fillStyle = '#2a1408';
+    ctx.fillRect(6, 6, iw - 12, platH);
 
-    // Archers on platform
+    // 4 archers (red dots, 4px each) on platform
     ctx.fillStyle = '#cc3333';
-    const archerY = 6 + ih * 0.11;
+    const archerY = 6 + platH / 2;
     for (let i = 0; i < 4; i++) {
-      const ax = 10 + i * ((iw - 20) / 3);
+      const ax = 12 + i * ((iw - 24) / 3);
       ctx.beginPath();
-      ctx.arc(ax, archerY, 1.8, 0, Math.PI * 2);
+      ctx.arc(ax, archerY, 4, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Wheels — dark rects on sides at the bottom
-    ctx.fillStyle = '#1a0a04';
-    ctx.fillRect(-3, ih - 14, 8, 12);
-    ctx.fillRect(iw - 5, ih - 14, 8, 12);
+    // Wheels — two dark rects on each side, 10×18px
+    ctx.fillStyle = '#0a0402';
+    ctx.fillRect(-5, ih - 22, 10, 18);
+    ctx.fillRect(iw - 5, ih - 22, 10, 18);
+    ctx.fillRect(-5, ih - 44, 10, 18);
+    ctx.fillRect(iw - 5, ih - 44, 10, 18);
 
-    // Scorch marks
+    // Scorch marks — larger
     for (const s of entity.scorchMarks) {
       ctx.save();
-      ctx.globalAlpha = 0.6;
-      ctx.fillStyle = '#1a0a04';
+      ctx.globalAlpha = 0.65;
+      ctx.fillStyle = '#0a0a04';
+      const sr = Math.max(s.r, 10) + 4;
       ctx.beginPath();
-      ctx.ellipse(s.x, s.y, s.r, s.r * 0.7, 0, 0, Math.PI * 2);
+      ctx.ellipse(s.x, s.y, sr, sr * 0.7, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -719,36 +789,40 @@ function renderEntities(ctx) {
 
 // ============ RENDERING — FALLBACK GRAPHICS ============
 function renderGround(ctx) {
-  // Sand base — fills everything above the wall
-  ctx.fillStyle = CONFIG.COLORS.GROUND;
-  ctx.fillRect(0, 0, gameWidth, wallY);
+  if (USE_SPRITE.mosaic_tile && SPRITES.mosaic_tile) {
+    // Tile the mosaic texture across the battlefield
+    const tile = SPRITES.mosaic_tile;
+    const tileSize = 256;
+    for (let x = 0; x < gameWidth; x += tileSize) {
+      for (let y = 0; y < wallY; y += tileSize) {
+        ctx.drawImage(tile, x, y, tileSize, tileSize);
+      }
+    }
+    // Subtle warm gradient overlay (lighter top, warmer toward wall)
+    const grad = ctx.createLinearGradient(0, 0, 0, wallY);
+    grad.addColorStop(0, 'rgba(180, 150, 100, 0.15)');
+    grad.addColorStop(1, 'rgba(120, 80, 40, 0.25)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, gameWidth, wallY);
+  } else {
+    // Fallback: deeper golden sand with gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, wallY);
+    grad.addColorStop(0, '#c4a87c');
+    grad.addColorStop(1, '#a8884a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, gameWidth, wallY);
+  }
 
-  // Sand dune patches
-  ctx.fillStyle = CONFIG.COLORS.GROUND_DARK;
+  // Sand dune patches — very subtle, just a hint of variation
+  ctx.fillStyle = 'rgba(160, 130, 80, 0.08)';
   for (const d of decorations.dunes) {
     ctx.beginPath();
     ctx.ellipse(d.x, d.y, d.rx, d.ry, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // Sand ripple curves — gentle horizontal sine waves
-  ctx.save();
-  ctx.globalAlpha = 0.35;
-  ctx.strokeStyle = CONFIG.COLORS.GROUND_DARK;
-  ctx.lineWidth = 0.7;
-  for (const baseY of decorations.ripples) {
-    ctx.beginPath();
-    for (let x = 0; x <= gameWidth; x += 6) {
-      const y = baseY + Math.sin(x / 60) * 4;
-      if (x === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // Tiny scattered rocks
-  ctx.fillStyle = '#4a2808';
+  // Tiny scattered rocks — slightly less prominent
+  ctx.fillStyle = 'rgba(74, 40, 8, 0.7)';
   for (const rock of decorations.rocks) {
     ctx.beginPath();
     ctx.arc(rock.x, rock.y, rock.r, 0, Math.PI * 2);
@@ -757,10 +831,29 @@ function renderGround(ctx) {
 }
 
 function renderWall(ctx) {
-  if (SPRITES.wall) {
-    ctx.drawImage(SPRITES.wall, 0, wallY, gameWidth, wallHeight);
-    if (SPRITES.city) {
-      ctx.drawImage(SPRITES.city, 0, wallY + walkwayHeight, gameWidth, wallHeight - walkwayHeight);
+  if (USE_SPRITE.wall && SPRITES.wall) {
+    // Fill the entire wall+city band with brick color first to hide any
+    // transparent gaps in the PNGs.
+    ctx.fillStyle = '#6b4423';
+    ctx.fillRect(0, wallY, gameWidth, wallHeight);
+
+    // Tile the wall image — the walkway portion sits at top
+    const wallImg = SPRITES.wall;
+    const wallRenderHeight = walkwayHeight;
+    const wallTileWidth = Math.max(1, wallImg.width * (wallRenderHeight / wallImg.height));
+    for (let x = 0; x < gameWidth; x += wallTileWidth) {
+      ctx.drawImage(wallImg, x, wallY, wallTileWidth, wallRenderHeight);
+    }
+
+    // Tile the city strip directly below (no gap)
+    if (USE_SPRITE.city && SPRITES.city) {
+      const cityImg = SPRITES.city;
+      const cityY = wallY + walkwayHeight;
+      const cityRenderHeight = wallHeight - walkwayHeight;
+      const cityTileWidth = Math.max(1, cityImg.width * (cityRenderHeight / cityImg.height));
+      for (let x = 0; x < gameWidth; x += cityTileWidth) {
+        ctx.drawImage(cityImg, x, cityY, cityTileWidth, cityRenderHeight);
+      }
     }
     return;
   }
@@ -824,8 +917,12 @@ function renderWall(ctx) {
   ctx.restore();
 
   // City strip — buildings & palms peeking from below the walkway
-  if (SPRITES.city) {
-    ctx.drawImage(SPRITES.city, 0, cityBaseY, gameWidth, cityH);
+  if (USE_SPRITE.city && SPRITES.city) {
+    const cityImg = SPRITES.city;
+    const cityTileWidth = Math.max(1, cityImg.width * (cityH / cityImg.height));
+    for (let x = 0; x < gameWidth; x += cityTileWidth) {
+      ctx.drawImage(cityImg, x, cityBaseY, cityTileWidth, cityH);
+    }
   } else {
     ctx.fillStyle = '#d6b888';
     for (const b of decorations.buildings) {
@@ -2164,19 +2261,37 @@ function renderBallista(ctx, b) {
     ctx.scale(0.85, 0.85);
     ctx.translate(-b.x, -b.y);
   }
-  // Dark base
-  ctx.fillStyle = CONFIG.COLORS.WOOD_BROWN;
-  ctx.fillRect(b.x - 8, b.y - 5, 16, 10);
-  // V-shaped bow arms above the base
-  ctx.strokeStyle = CONFIG.COLORS.WOOD_LIGHT;
-  ctx.lineWidth = 2;
+  // Recoil shrinks the V-arms inward
+  const armSpread = b.recoilTimer > 0 ? 6 : 12;
+  const armHeight = b.recoilTimer > 0 ? 8 : 12;
+
+  // Dark wood base — 24×14
+  ctx.fillStyle = '#3d2414';
+  ctx.fillRect(b.x - 12, b.y - 7, 24, 14);
+
+  // Subtle wood grain highlight on top edge
+  ctx.fillStyle = '#5a3520';
+  ctx.fillRect(b.x - 12, b.y - 7, 24, 2);
+
+  // V-shaped bow arms above the base, 12px each
+  ctx.strokeStyle = '#3d2414';
+  ctx.lineWidth = 2.5;
   ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(b.x, b.y - 5);
-  ctx.lineTo(b.x - 9, b.y - 16);
-  ctx.moveTo(b.x, b.y - 5);
-  ctx.lineTo(b.x + 9, b.y - 16);
+  ctx.moveTo(b.x, b.y - 7);
+  ctx.lineTo(b.x - armSpread, b.y - 7 - armHeight);
+  ctx.moveTo(b.x, b.y - 7);
+  ctx.lineTo(b.x + armSpread, b.y - 7 - armHeight);
   ctx.stroke();
+
+  // Bowstring across the top of the arms
+  ctx.strokeStyle = '#d4c4a8';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(b.x - armSpread, b.y - 7 - armHeight);
+  ctx.lineTo(b.x + armSpread, b.y - 7 - armHeight);
+  ctx.stroke();
+
   ctx.restore();
 }
 
@@ -2737,6 +2852,33 @@ function update(dt) {
   }
 }
 
+function renderCrosshair(ctx) {
+  if (state.screen !== 'PLAYING') return;
+  if (isTouchDevice) return;
+  if (mouseX < 0 || mouseY < 0) return;
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 215, 0, 0.7)';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  const size = 15;
+  ctx.beginPath();
+  ctx.moveTo(mouseX - size, mouseY);
+  ctx.lineTo(mouseX - 5, mouseY);
+  ctx.moveTo(mouseX + 5, mouseY);
+  ctx.lineTo(mouseX + size, mouseY);
+  ctx.moveTo(mouseX, mouseY - size);
+  ctx.lineTo(mouseX, mouseY - 5);
+  ctx.moveTo(mouseX, mouseY + 5);
+  ctx.lineTo(mouseX, mouseY + size);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 215, 0, 0.9)';
+  ctx.beginPath();
+  ctx.arc(mouseX, mouseY, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function render() {
   ctx.fillStyle = '#1a0a04';
   ctx.fillRect(0, 0, gameWidth, gameHeight);
@@ -2753,6 +2895,7 @@ function render() {
   }
 
   renderBorderFrame(ctx);
+  renderCrosshair(ctx);
 }
 
 function gameLoop(timestamp) {
@@ -2775,6 +2918,15 @@ function init() {
   canvas.addEventListener('mousedown', (e) => {
     e.preventDefault();
     handleInput(e.clientX, e.clientY);
+  });
+  canvas.addEventListener('mousemove', (e) => {
+    const coords = getGameCoords(e.clientX, e.clientY);
+    mouseX = coords.x;
+    mouseY = coords.y;
+  });
+  canvas.addEventListener('mouseleave', () => {
+    mouseX = -100;
+    mouseY = -100;
   });
   canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
