@@ -16,9 +16,8 @@ html, body {
 #game {
   display: block;
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  top: 0;
+  left: 0;
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
