@@ -317,10 +317,262 @@ function renderLegionarySquad(ctx, entity) {
   }
 }
 
-function renderEntity(ctx, entity) {
-  if (entity.type === 'legionary') {
-    renderLegionarySquad(ctx, entity);
+function createTestudo(x, y, speedMultiplier) {
+  return {
+    type: 'testudo',
+    x: x, y: y,
+    hp: CONFIG.TESTUDO_HP, maxHp: CONFIG.TESTUDO_HP,
+    speed: CONFIG.TESTUDO_SPEED * speedMultiplier,
+    alive: true,
+    width: CONFIG.TESTUDO_WIDTH, height: CONFIG.TESTUDO_HEIGHT,
+    cracks: [],
+    flashTimer: 0,
+    crumbling: false, crumbleTimer: 0.3,
+    dustTimer: 0,
+    spawnY: -50,
+    pathStartX: x, pathControlX: x, pathEndX: x,
+  };
+}
+
+function generateCrack(entity) {
+  const points = [];
+  let x = Math.random() * entity.width * 0.8;
+  let y = Math.random() * entity.height * 0.3;
+  for (let i = 0; i < 4; i++) {
+    x += Math.random() * 15 - 5;
+    y += Math.random() * 15 + 5;
+    points.push({ x, y });
   }
+  entity.cracks.push(points);
+}
+
+function renderTestudo(ctx, entity) {
+  const scale = entityScale(entity);
+  const flashing = entity.flashTimer > 0;
+  const w = entity.width * scale;
+  const h = entity.height * scale;
+  const x0 = entity.x - w / 2;
+  const y0 = entity.y - h / 2;
+
+  if (SPRITES.testudo) {
+    ctx.save();
+    if (flashing) ctx.filter = 'brightness(1.8)';
+    ctx.drawImage(SPRITES.testudo, x0, y0, w, h);
+    ctx.restore();
+    if (entity.cracks.length > 0) {
+      ctx.save();
+      ctx.translate(x0, y0);
+      ctx.scale(scale, scale);
+      ctx.strokeStyle = '#1a0a04';
+      ctx.lineWidth = 2;
+      for (const crack of entity.cracks) {
+        ctx.beginPath();
+        for (let i = 0; i < crack.length; i++) {
+          const p = crack[i];
+          if (i === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    return;
+  }
+
+  // Soft shadow
+  ctx.save();
+  ctx.fillStyle = CONFIG.COLORS.SHADOW;
+  ctx.beginPath();
+  ctx.ellipse(entity.x, entity.y + h / 2 + 3, w * 0.45, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Main red shield body
+  ctx.fillStyle = flashing ? '#ffb0a0' : CONFIG.COLORS.SHIELD_RED;
+  ctx.fillRect(x0, y0, w, h);
+
+  // Dark border
+  ctx.strokeStyle = '#1a0a04';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x0, y0, w, h);
+
+  // Grid 3 rows × 5 columns
+  ctx.save();
+  ctx.translate(x0, y0);
+  ctx.scale(scale, scale);
+  const innerW = entity.width;
+  const innerH = entity.height;
+  const cols = 5, rows = 3;
+  const cellW = innerW / cols;
+  const cellH = innerH / rows;
+
+  // Dark red separators
+  ctx.strokeStyle = '#7a2a1a';
+  ctx.lineWidth = 1;
+  for (let c = 1; c < cols; c++) {
+    ctx.beginPath();
+    ctx.moveTo(c * cellW, 0);
+    ctx.lineTo(c * cellW, innerH);
+    ctx.stroke();
+  }
+  for (let r = 1; r < rows; r++) {
+    ctx.beginPath();
+    ctx.moveTo(0, r * cellH);
+    ctx.lineTo(innerW, r * cellH);
+    ctx.stroke();
+  }
+
+  // Gold cross + dot in each cell
+  ctx.strokeStyle = CONFIG.COLORS.GOLD;
+  ctx.fillStyle = CONFIG.COLORS.GOLD;
+  ctx.lineWidth = 0.8;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cx = c * cellW + cellW / 2;
+      const cy = r * cellH + cellH / 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - cellW * 0.3, cy);
+      ctx.lineTo(cx + cellW * 0.3, cy);
+      ctx.moveTo(cx, cy - cellH * 0.3);
+      ctx.lineTo(cx, cy + cellH * 0.3);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Cracks
+  if (entity.cracks.length > 0) {
+    ctx.strokeStyle = '#1a0a04';
+    ctx.lineWidth = 2;
+    for (const crack of entity.cracks) {
+      ctx.beginPath();
+      for (let i = 0; i < crack.length; i++) {
+        const p = crack[i];
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function createSiegeTower(x, y, speedMultiplier) {
+  return {
+    type: 'siegeTower',
+    x: x, y: y,
+    hp: CONFIG.SIEGE_TOWER_HP, maxHp: CONFIG.SIEGE_TOWER_HP,
+    speed: CONFIG.SIEGE_TOWER_SPEED * speedMultiplier,
+    alive: true,
+    width: CONFIG.SIEGE_TOWER_WIDTH, height: CONFIG.SIEGE_TOWER_HEIGHT,
+    scorchMarks: [],
+    smoking: false,
+    flashTimer: 0,
+    crumbling: false, crumbleTimer: 0.4,
+    dustTimer: 0,
+    spawnY: -90,
+    pathStartX: x, pathControlX: x, pathEndX: x,
+  };
+}
+
+function renderSiegeTower(ctx, entity) {
+  const scale = entityScale(entity);
+  const flashing = entity.flashTimer > 0;
+  const w = entity.width * scale;
+  const h = entity.height * scale;
+  const x0 = entity.x - w / 2;
+  const y0 = entity.y - h / 2;
+
+  if (SPRITES.siegeTower) {
+    ctx.save();
+    if (flashing) ctx.filter = 'brightness(1.8)';
+    ctx.drawImage(SPRITES.siegeTower, x0, y0, w, h);
+    ctx.restore();
+  } else {
+    // Shadow
+    ctx.save();
+    ctx.fillStyle = CONFIG.COLORS.SHADOW;
+    ctx.beginPath();
+    ctx.ellipse(entity.x, entity.y + h / 2 + 4, w * 0.5, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Main brown body
+    ctx.fillStyle = flashing ? '#d8b078' : CONFIG.COLORS.WOOD_LIGHT;
+    ctx.fillRect(x0, y0, w, h);
+    ctx.strokeStyle = CONFIG.COLORS.WOOD_BROWN;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x0, y0, w, h);
+
+    ctx.save();
+    ctx.translate(x0, y0);
+    ctx.scale(scale, scale);
+    const iw = entity.width;
+    const ih = entity.height;
+
+    // Cross-brace X
+    ctx.strokeStyle = CONFIG.COLORS.WOOD_BROWN;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(4, 4); ctx.lineTo(iw - 4, ih - 4);
+    ctx.moveTo(iw - 4, 4); ctx.lineTo(4, ih - 4);
+    ctx.stroke();
+
+    // Platform near top
+    ctx.fillStyle = '#3a1f0a';
+    ctx.fillRect(6, 6, iw - 12, ih * 0.22);
+
+    // Archers on platform
+    ctx.fillStyle = '#cc3333';
+    const archerY = 6 + ih * 0.11;
+    for (let i = 0; i < 4; i++) {
+      const ax = 10 + i * ((iw - 20) / 3);
+      ctx.beginPath();
+      ctx.arc(ax, archerY, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Wheels — dark rects on sides at the bottom
+    ctx.fillStyle = '#1a0a04';
+    ctx.fillRect(-3, ih - 14, 8, 12);
+    ctx.fillRect(iw - 5, ih - 14, 8, 12);
+
+    // Scorch marks
+    for (const s of entity.scorchMarks) {
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = '#1a0a04';
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y, s.r, s.r * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  // Smoke (drawn in screen space above the tower)
+  if (entity.smoking) {
+    ctx.save();
+    ctx.fillStyle = '#888';
+    ctx.globalAlpha = 0.55;
+    const driftT = state.time / 800;
+    for (let i = 0; i < 3; i++) {
+      const ox = Math.sin(driftT + i * 1.7) * 6 + (i - 1) * 8;
+      const oy = -10 - i * 9 + Math.sin(driftT * 1.3 + i) * 2;
+      ctx.beginPath();
+      ctx.arc(entity.x + ox, y0 + oy, 5 + i * 1.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function renderEntity(ctx, entity) {
+  if (entity.type === 'legionary')      renderLegionarySquad(ctx, entity);
+  else if (entity.type === 'testudo')   renderTestudo(ctx, entity);
+  else if (entity.type === 'siegeTower') renderSiegeTower(ctx, entity);
 }
 
 function renderEntities(ctx) {
@@ -473,30 +725,109 @@ let waveSpawnTimer = 0;
 let betweenWaves = false;
 let betweenWaveTimer = 0;
 
-function spawnWave() {
-  const level = state.level;
-  const count = level <= 2
-    ? 3 + Math.floor(Math.random() * 2)        // 3-4
-    : 4 + Math.floor(Math.random() * 3);       // 4-6
+function getLevelConfig(level) {
+  const isBoss = level % CONFIG.BOSS_INTERVAL === 0;
 
-  state.waveEnemiesTotal = count;
-  state.waveEnemiesRemaining = count;
-  state.waveDamage = 0;
-
-  waveSpawnQueue = [];
-  for (let i = 0; i < count; i++) {
-    const delay = 0.3 + Math.random() * 0.3;   // 300-600ms between spawns
-    waveSpawnQueue.push({ type: 'legionary', delay });
+  if (isBoss) {
+    const bossLevel = level / CONFIG.BOSS_INTERVAL;
+    const legCount = 2 + bossLevel;
+    const testudoCount = Math.max(0, bossLevel - 1);
+    const towerCount = bossLevel >= 4 ? 2 : 1;
+    return {
+      enemies: [
+        ...Array(towerCount).fill('siegeTower'),
+        ...Array(testudoCount).fill('testudo'),
+        ...Array(legCount).fill('legionary'),
+      ],
+      speedMultiplier: 1.0 + (bossLevel - 1) * 0.1,
+      isBoss: true,
+    };
   }
+
+  let legCount, testudoCount, speed;
+  if (level <= 2) {
+    legCount = 3 + Math.floor(Math.random() * 2);
+    testudoCount = 0;
+    speed = 1.0;
+  } else if (level <= 4) {
+    legCount = 3 + Math.floor(Math.random() * 2);
+    testudoCount = 1;
+    speed = 1.1;
+  } else if (level <= 9) {
+    legCount = 4 + Math.floor(Math.random() * 2);
+    testudoCount = 1 + Math.floor(Math.random() * 2);
+    speed = 1.2;
+  } else if (level <= 14) {
+    legCount = 5 + Math.floor(Math.random() * 2);
+    testudoCount = 2;
+    speed = 1.3;
+  } else if (level <= 19) {
+    legCount = 5 + Math.floor(Math.random() * 3);
+    testudoCount = 2 + Math.floor(Math.random() * 2);
+    speed = 1.4;
+  } else if (level <= 30) {
+    legCount = 6 + Math.floor(Math.random() * 3);
+    testudoCount = Math.floor(legCount * 0.4);
+    speed = 1.5 + (level - 20) * 0.02;
+  } else if (level <= 40) {
+    legCount = 7 + Math.floor(Math.random() * 4);
+    testudoCount = Math.floor(legCount * 0.5);
+    speed = 1.8 + (level - 30) * 0.02;
+  } else {
+    legCount = 8 + Math.floor(Math.random() * 5);
+    testudoCount = Math.floor(legCount * 0.6);
+    speed = 2.0 + (level - 40) * 0.05;
+  }
+
+  return {
+    enemies: [
+      ...Array(testudoCount).fill('testudo'),
+      ...Array(legCount).fill('legionary'),
+    ],
+    speedMultiplier: speed,
+    isBoss: false,
+  };
+}
+
+function spawnDelayForType(type) {
+  if (type === 'siegeTower') return 1.5;
+  if (type === 'testudo')    return 0.8;
+  return 0.3 + Math.random() * 0.3; // legionary 300-600ms
+}
+
+function spawnWave() {
+  const cfg = getLevelConfig(state.level);
+  const enemies = cfg.enemies.slice();
+
+  // Shuffle so testudos aren't always grouped at the front (but keep siege towers
+  // at the very front of boss waves so the dramatic entry leads).
+  const towers = enemies.filter(t => t === 'siegeTower');
+  const rest   = enemies.filter(t => t !== 'siegeTower');
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [rest[i], rest[j]] = [rest[j], rest[i]];
+  }
+  const ordered = [...towers, ...rest];
+
+  state.waveEnemiesTotal = ordered.length;
+  state.waveEnemiesRemaining = ordered.length;
+  state.waveDamage = 0;
+  state.currentSpeedMult = cfg.speedMultiplier;
+
+  waveSpawnQueue = ordered.map(type => ({ type, delay: spawnDelayForType(type) }));
   waveSpawnTimer = waveSpawnQueue[0].delay;
 }
 
 function spawnEnemyOfType(type) {
-  const x = gameWidth * (0.1 + Math.random() * 0.8);
-  const y = -50;
-  const speedMult = 1 + (state.level - 1) * 0.05;
+  const speedMult = state.currentSpeedMult || (1 + (state.level - 1) * 0.05);
   if (type === 'legionary') {
-    state.entities.push(createLegionarySquad(x, y, speedMult));
+    const x = gameWidth * (0.1 + Math.random() * 0.8);
+    state.entities.push(createLegionarySquad(x, -50, speedMult));
+  } else if (type === 'testudo') {
+    const x = gameWidth * (0.15 + Math.random() * 0.7);
+    state.entities.push(createTestudo(x, -50, speedMult));
+  } else if (type === 'siegeTower') {
+    state.entities.push(createSiegeTower(gameWidth / 2, -90, speedMult));
   }
 }
 
@@ -543,7 +874,9 @@ function updateWaveState(dt) {
     if (state.wave >= CONFIG.WAVES_PER_LEVEL) {
       state.level += 1;
       state.wave = 0;
-      state.screen = 'LEVEL_UP';
+      state.waveDamage = 0;
+      const nextIsBoss = state.level % CONFIG.BOSS_INTERVAL === 0;
+      state.screen = nextIsBoss ? 'BOSS_WARNING' : 'LEVEL_UP';
     } else {
       betweenWaves = true;
       betweenWaveTimer = CONFIG.WAVE_PAUSE / 1000;
@@ -641,9 +974,22 @@ function checkCollisions() {
         entity.hp -= 1;
         entity.flashTimer = 0.05;
 
+        if (entity.hp > 0) {
+          if (entity.type === 'testudo') {
+            generateCrack(entity);
+          } else if (entity.type === 'siegeTower') {
+            entity.scorchMarks.push({
+              x: Math.random() * 50 + 10,
+              y: Math.random() * 60 + 15,
+              r: 5 + Math.random() * 8,
+            });
+            if (entity.hp <= 2) entity.smoking = true;
+          }
+        }
+
         if (entity.hp <= 0) {
           entity.crumbling = true;
-          entity.crumbleTimer = 0.3;
+          entity.crumbleTimer = entity.type === 'siegeTower' ? 0.4 : 0.3;
 
           const baseScore = scoreForType(entity.type);
           const earned = baseScore * state.multiplier;
@@ -670,15 +1016,16 @@ function checkCollisions() {
     if (!entity.alive || entity.crumbling) continue;
     if (entity.y + entity.height / 2 >= wallY) {
       entity.crumbling = true;
-      entity.crumbleTimer = 0.3;
+      entity.crumbleTimer = entity.type === 'siegeTower' ? 0.4 : 0.3;
 
-      state.hearts -= 1;
+      const damage = entity.type === 'siegeTower' ? 2 : 1;
+      state.hearts -= damage;
       state.multiplier = 1;
       state.consecutiveKills = 0;
-      state.waveDamage += 1;
+      state.waveDamage += damage;
       state.wallFlash = 0.3;
 
-      if (typeof triggerShake === 'function') triggerShake(4, 0.2);
+      if (typeof triggerShake === 'function') triggerShake(entity.type === 'siegeTower' ? 6 : 4, 0.2);
 
       if (state.hearts <= 0) {
         state.hearts = 0;
@@ -993,8 +1340,96 @@ function renderOverlayPlaceholder(ctx, label) {
   ctx.fillText(label, gameWidth / 2, gameHeight / 2);
 }
 
-function renderLevelUp(ctx)    { renderOverlayPlaceholder(ctx, `LEVEL ${state.level} — tap to continue`); }
-function renderBossWarning(ctx){ renderOverlayPlaceholder(ctx, 'BOSS INCOMING — tap to continue'); }
+function difficultyLabel(level) {
+  if (level <= 5)  return 'Skirmish';
+  if (level <= 10) return 'Assault';
+  if (level <= 15) return 'Siege';
+  if (level <= 20) return 'Onslaught';
+  if (level <= 25) return 'Fury';
+  if (level <= 30) return "Aurelian's Wrath";
+  if (level <= 40) return 'Merciless';
+  return 'Impossible';
+}
+
+function renderLevelUp(ctx) {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, gameWidth, gameHeight);
+
+  const cx = gameWidth / 2;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
+  ctx.font = '20px monospace';
+  ctx.fillText('◆ LEVEL UP ◆', cx, gameHeight * 0.3);
+
+  ctx.fillStyle = '#4ecdc4';
+  ctx.font = 'bold 72px monospace';
+  ctx.fillText(String(state.level), cx, gameHeight * 0.42);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '24px monospace';
+  ctx.fillText(difficultyLabel(state.level), cx, gameHeight * 0.5);
+
+  const pulse = 0.5 + 0.5 * Math.sin(state.time / 400);
+  ctx.globalAlpha = 0.4 + 0.6 * pulse;
+  ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
+  ctx.font = '20px serif';
+  ctx.fillText('TAP TO CONTINUE', cx, gameHeight * 0.6);
+  ctx.globalAlpha = 1;
+}
+
+function wrapText(ctx, text, maxWidth) {
+  const words = text.split(' ');
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function renderBossWarning(ctx) {
+  ctx.fillStyle = 'rgba(30, 15, 0, 0.8)';
+  ctx.fillRect(0, 0, gameWidth, gameHeight);
+
+  const cx = gameWidth / 2;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.fillStyle = '#ffb84d';
+  ctx.font = '16px monospace';
+  ctx.fillText('ENEMY SIEGE REPORT', cx, gameHeight * 0.28);
+
+  ctx.fillStyle = '#ffb84d';
+  ctx.font = 'bold 36px monospace';
+  ctx.fillText('THREAT WARNING', cx, gameHeight * 0.36);
+
+  ctx.fillStyle = '#f0e6d0';
+  ctx.font = '16px serif';
+  const body = 'A siege tower approaches the walls. These armored giants require multiple direct hits. Prepare the ballistae.';
+  const lines = wrapText(ctx, body, gameWidth * 0.7);
+  let y = gameHeight * 0.46;
+  for (const line of lines) {
+    ctx.fillText(line, cx, y);
+    y += 22;
+  }
+
+  const pulse = 0.5 + 0.5 * Math.sin(state.time / 400);
+  ctx.globalAlpha = 0.4 + 0.6 * pulse;
+  ctx.fillStyle = '#ffb84d';
+  ctx.font = '20px serif';
+  ctx.fillText('TAP TO DEFEND', cx, gameHeight * 0.6);
+  ctx.globalAlpha = 1;
+}
+
 function renderPaused(ctx)     { renderOverlayPlaceholder(ctx, 'PAUSED — tap to resume'); }
 
 function renderGameOver(ctx) {
