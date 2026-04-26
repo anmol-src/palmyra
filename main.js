@@ -156,9 +156,21 @@ function getGameCoords(clientX, clientY) {
 }
 
 function handleGameplayTap(x, y) {
-  // Prompt 2: no enemies yet — fire toward whatever was tapped.
-  // Later prompts will pick the nearest enemy first.
-  fireBoltFromNearest(x, y);
+  let nearest = null;
+  let bestDist = Infinity;
+  for (const entity of state.entities) {
+    if (!entity.alive || entity.crumbling) continue;
+    const scale = entityScale(entity);
+    const hitRadius = entity.width * scale * CONFIG.TAP_RADIUS_MULTIPLIER;
+    const d = Math.hypot(x - entity.x, y - entity.y);
+    if (d < hitRadius && d < bestDist) {
+      bestDist = d;
+      nearest = entity;
+    }
+  }
+  if (nearest) {
+    fireBoltFromNearest(nearest.x, nearest.y);
+  }
 }
 
 function handleInput(clientX, clientY) {
@@ -167,24 +179,31 @@ function handleInput(clientX, clientY) {
 
   switch (state.screen) {
     case 'TITLE':
-      state.screen = 'PLAYING';
       state.firstPlay = false;
+      startGame();
       break;
     case 'LEVEL_UP':
     case 'BOSS_WARNING':
+      // Resume play — next wave kicks off immediately
+      betweenWaves = false;
+      betweenWaveTimer = 0;
+      if (state.waveEnemiesTotal === 0 && waveSpawnQueue.length === 0) {
+        spawnWave();
+      }
       state.screen = 'PLAYING';
       break;
     case 'GAME_OVER':
-      state.score = 0;
-      state.level = 1;
-      state.wave = 0;
-      state.hearts = CONFIG.MAX_HEARTS;
+      state.screen = 'TITLE';
       state.entities = [];
       state.bolts = [];
       state.particles = [];
       state.popups = [];
       state.collectibles = [];
-      state.screen = 'TITLE';
+      state.wallFlash = 0;
+      waveSpawnQueue = [];
+      waveSpawnTimer = 0;
+      betweenWaves = false;
+      betweenWaveTimer = 0;
       break;
     case 'PAUSED':
       state.screen = 'PLAYING';
@@ -197,7 +216,127 @@ function handleInput(clientX, clientY) {
 }
 
 // ============ ENTITIES ============
-// TODO Prompt 4
+
+function entityScale(entity) {
+  const t = Math.max(0, Math.min(1, entity.y / wallY));
+  return CONFIG.SCALE_MIN + (CONFIG.SCALE_MAX - CONFIG.SCALE_MIN) * t;
+}
+
+function createLegionarySquad(x, y, speedMultiplier = 1) {
+  return {
+    type: 'legionary',
+    x: x,
+    y: y,
+    soldiers: Array.from({length: CONFIG.LEGIONARY_SQUAD_SIZE}, () => ({
+      offsetX: (Math.random() - 0.5) * 16,
+      offsetY: (Math.random() - 0.5) * 12,
+      bobPhase: Math.random() * Math.PI * 2,
+      renderOffsetY: 0,
+    })),
+    hp: CONFIG.LEGIONARY_HP,
+    speed: CONFIG.LEGIONARY_SPEED * speedMultiplier,
+    alive: true,
+    width: 40,
+    height: 35,
+    flashTimer: 0,
+    crumbling: false,
+    crumbleTimer: 0.3,
+    dustTimer: 0,
+    pathStartX: x,
+    pathControlX: x + (Math.random() - 0.5) * 80,
+    pathEndX: x + (Math.random() - 0.5) * 30,
+    pathStartY: -50,
+    spawnY: -50,
+  };
+}
+
+function renderLegionarySquad(ctx, entity) {
+  const scale = entityScale(entity);
+  const flashing = entity.flashTimer > 0;
+
+  for (const s of entity.soldiers) {
+    const sx = entity.x + s.offsetX;
+    const sy = entity.y + s.offsetY + (s.renderOffsetY || 0);
+
+    if (SPRITES.legionary) {
+      const w = entity.width * scale;
+      const h = entity.height * scale;
+      ctx.save();
+      if (flashing) ctx.filter = 'brightness(1.8)';
+      ctx.drawImage(SPRITES.legionary, sx - w / 2, sy - h / 2, w, h);
+      ctx.restore();
+      continue;
+    }
+
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.scale(scale, scale);
+
+    // Soft shadow under the soldier
+    ctx.fillStyle = CONFIG.COLORS.SHADOW;
+    ctx.beginPath();
+    ctx.ellipse(0, 9, 7, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Helmet — dark circle with lighter inner highlight
+    ctx.fillStyle = flashing ? '#ffffff' : '#3a2a18';
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = flashing ? '#ffe6a8' : '#5a4828';
+    ctx.beginPath();
+    ctx.arc(-1, -1.2, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Tiny crest
+    ctx.strokeStyle = CONFIG.COLORS.CREST_RED;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(0, -5);
+    ctx.lineTo(0, -8);
+    ctx.stroke();
+
+    // Shield — red rect with gold trim + boss
+    ctx.fillStyle = flashing ? '#ffb0a0' : CONFIG.COLORS.SHIELD_RED;
+    ctx.fillRect(4, -3, 6, 10);
+    ctx.fillStyle = CONFIG.COLORS.GOLD;
+    ctx.fillRect(7, -1, 0.8, 6);
+    ctx.beginPath();
+    ctx.arc(7.4, 2, 1, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Sword — thin grey line
+    ctx.strokeStyle = '#9a9a9a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-5, 1);
+    ctx.lineTo(-9, 6);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+}
+
+function renderEntity(ctx, entity) {
+  if (entity.type === 'legionary') {
+    renderLegionarySquad(ctx, entity);
+  }
+}
+
+function renderEntities(ctx) {
+  // Render back-to-front so closer enemies draw on top
+  const sorted = state.entities.filter(e => e.alive).slice().sort((a, b) => a.y - b.y);
+  for (const e of sorted) {
+    if (e.crumbling) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, e.crumbleTimer / 0.3);
+      renderEntity(ctx, e);
+      ctx.restore();
+    } else {
+      renderEntity(ctx, e);
+    }
+  }
+}
 
 // ============ RENDERING — FALLBACK GRAPHICS ============
 function renderGround(ctx) {
@@ -329,10 +468,242 @@ function renderWall(ctx) {
 // TODO Prompt 6
 
 // ============ WAVE SPAWNER ============
-// TODO Prompt 4
+let waveSpawnQueue = [];
+let waveSpawnTimer = 0;
+let betweenWaves = false;
+let betweenWaveTimer = 0;
+
+function spawnWave() {
+  const level = state.level;
+  const count = level <= 2
+    ? 3 + Math.floor(Math.random() * 2)        // 3-4
+    : 4 + Math.floor(Math.random() * 3);       // 4-6
+
+  state.waveEnemiesTotal = count;
+  state.waveEnemiesRemaining = count;
+  state.waveDamage = 0;
+
+  waveSpawnQueue = [];
+  for (let i = 0; i < count; i++) {
+    const delay = 0.3 + Math.random() * 0.3;   // 300-600ms between spawns
+    waveSpawnQueue.push({ type: 'legionary', delay });
+  }
+  waveSpawnTimer = waveSpawnQueue[0].delay;
+}
+
+function spawnEnemyOfType(type) {
+  const x = gameWidth * (0.1 + Math.random() * 0.8);
+  const y = -50;
+  const speedMult = 1 + (state.level - 1) * 0.05;
+  if (type === 'legionary') {
+    state.entities.push(createLegionarySquad(x, y, speedMult));
+  }
+}
+
+function updateWaveState(dt) {
+  const dtSec = dt / 1000;
+
+  // Stagger out queued spawns
+  if (waveSpawnQueue.length > 0) {
+    waveSpawnTimer -= dtSec;
+    if (waveSpawnTimer <= 0) {
+      const next = waveSpawnQueue.shift();
+      spawnEnemyOfType(next.type);
+      state.waveEnemiesRemaining = Math.max(0, state.waveEnemiesRemaining - 1);
+      if (waveSpawnQueue.length > 0) {
+        waveSpawnTimer = waveSpawnQueue[0].delay;
+      }
+    }
+  }
+
+  // Pause between waves
+  if (betweenWaves) {
+    betweenWaveTimer -= dtSec;
+    if (betweenWaveTimer <= 0) {
+      betweenWaves = false;
+      spawnWave();
+    }
+    return;
+  }
+
+  // Wave complete: queue empty, no live enemies, no bolts in flight
+  const aliveEnemies = state.entities.filter(e => e.alive && !e.crumbling).length;
+  if (state.waveEnemiesTotal > 0 && waveSpawnQueue.length === 0 && aliveEnemies === 0 && state.bolts.length === 0) {
+    state.waveEnemiesTotal = 0;
+
+    if (state.waveDamage === 0) {
+      const bonus = CONFIG.PERFECT_WAVE_BONUS * state.multiplier;
+      state.score += bonus;
+      if (typeof spawnPopup === 'function') {
+        spawnPopup(gameWidth / 2, wallY - 40, `PERFECT +${bonus}`);
+      }
+    }
+
+    state.wave += 1;
+    if (state.wave >= CONFIG.WAVES_PER_LEVEL) {
+      state.level += 1;
+      state.wave = 0;
+      state.screen = 'LEVEL_UP';
+    } else {
+      betweenWaves = true;
+      betweenWaveTimer = CONFIG.WAVE_PAUSE / 1000;
+    }
+  }
+}
+
+function startGame() {
+  state.score = 0;
+  state.level = 1;
+  state.wave = 0;
+  state.hearts = CONFIG.MAX_HEARTS;
+  state.multiplier = 1;
+  state.consecutiveKills = 0;
+  state.waveEnemiesTotal = 0;
+  state.waveEnemiesRemaining = 0;
+  state.waveDamage = 0;
+  state.entities = [];
+  state.bolts = [];
+  state.particles = [];
+  state.popups = [];
+  state.collectibles = [];
+  state.wallFlash = 0;
+  state.shake.x = 0; state.shake.y = 0; state.shake.intensity = 0; state.shake.duration = 0;
+  waveSpawnQueue = [];
+  waveSpawnTimer = 0;
+  betweenWaves = false;
+  betweenWaveTimer = 0;
+  initBallistae();
+  spawnWave();
+  state.screen = 'PLAYING';
+}
 
 // ============ COLLISION ============
-// TODO Prompt 4
+function scoreForType(type) {
+  if (type === 'testudo') return CONFIG.TESTUDO_SCORE;
+  if (type === 'siegeTower') return CONFIG.SIEGE_TOWER_SCORE;
+  return CONFIG.LEGIONARY_SCORE;
+}
+
+function updateEntities(dt) {
+  const dtSec = dt / 1000;
+
+  for (const entity of state.entities) {
+    if (!entity.alive) continue;
+
+    if (entity.flashTimer > 0) {
+      entity.flashTimer = Math.max(0, entity.flashTimer - dtSec);
+    }
+
+    if (entity.crumbling) {
+      entity.crumbleTimer -= dtSec;
+      if (entity.crumbleTimer <= 0) entity.alive = false;
+      continue;
+    }
+
+    // Advance down the field
+    entity.y += entity.speed * dtSec;
+
+    // Bezier path along the descent
+    const denom = (wallY - entity.spawnY) || 1;
+    const progress = (entity.y - entity.spawnY) / denom;
+    const t = Math.max(0, Math.min(1, progress));
+    const u = 1 - t;
+    entity.x = u * u * entity.pathStartX
+             + 2 * u * t * entity.pathControlX
+             + t * t * entity.pathEndX;
+
+    // Soldier bobbing + small lateral drift
+    if (entity.soldiers) {
+      const timeSec = state.time / 1000;
+      for (const s of entity.soldiers) {
+        s.renderOffsetY = Math.sin(timeSec * CONFIG.BOB_FREQUENCY + s.bobPhase) * CONFIG.BOB_AMPLITUDE;
+        s.offsetX += (Math.random() - 0.5) * 0.3;
+        if (s.offsetX > 8) s.offsetX = 8;
+        else if (s.offsetX < -8) s.offsetX = -8;
+      }
+    }
+  }
+
+  state.entities = state.entities.filter(e => e.alive);
+}
+
+function checkCollisions() {
+  // Bolt → Enemy
+  for (const bolt of state.bolts) {
+    if (!bolt.alive) continue;
+    for (const entity of state.entities) {
+      if (!entity.alive || entity.crumbling) continue;
+      const scale = entityScale(entity);
+      const hitRadius = (entity.width / 2) * scale * CONFIG.TAP_RADIUS_MULTIPLIER;
+      const d = Math.hypot(bolt.x - entity.x, bolt.y - entity.y);
+      if (d < hitRadius) {
+        bolt.alive = false;
+        entity.hp -= 1;
+        entity.flashTimer = 0.05;
+
+        if (entity.hp <= 0) {
+          entity.crumbling = true;
+          entity.crumbleTimer = 0.3;
+
+          const baseScore = scoreForType(entity.type);
+          const earned = baseScore * state.multiplier;
+          state.score += earned;
+          state.consecutiveKills += 1;
+          if (state.consecutiveKills % 3 === 0 && state.multiplier < 5) {
+            state.multiplier += 1;
+          }
+
+          if (typeof spawnPopup === 'function') {
+            spawnPopup(entity.x, entity.y, `+${earned}`);
+          }
+          if (typeof triggerShake === 'function') {
+            triggerShake(2, 0.1);
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // Enemy → Wall
+  for (const entity of state.entities) {
+    if (!entity.alive || entity.crumbling) continue;
+    if (entity.y + entity.height / 2 >= wallY) {
+      entity.crumbling = true;
+      entity.crumbleTimer = 0.3;
+
+      state.hearts -= 1;
+      state.multiplier = 1;
+      state.consecutiveKills = 0;
+      state.waveDamage += 1;
+      state.wallFlash = 0.3;
+
+      if (typeof triggerShake === 'function') triggerShake(4, 0.2);
+
+      if (state.hearts <= 0) {
+        state.hearts = 0;
+        if (state.score > state.bestScore) {
+          state.bestScore = state.score;
+          try { localStorage.setItem('palmyra_best', String(state.bestScore)); } catch (e) {}
+        }
+        state.screen = 'GAME_OVER';
+      }
+    }
+  }
+
+  state.bolts = state.bolts.filter(b => b.alive);
+}
+
+function renderWallFlash(ctx) {
+  if (state.wallFlash > 0) {
+    ctx.save();
+    const a = Math.min(0.5, (state.wallFlash / 0.3) * 0.5);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = '#ff3333';
+    ctx.fillRect(0, wallY - 12, gameWidth, wallHeight + 12);
+    ctx.restore();
+  }
+}
 
 // ============ UI RENDERER ============
 function renderHUD(ctx) {
@@ -622,19 +993,50 @@ function renderOverlayPlaceholder(ctx, label) {
   ctx.fillText(label, gameWidth / 2, gameHeight / 2);
 }
 
-function renderLevelUp(ctx)    { renderOverlayPlaceholder(ctx, 'LEVEL UP — tap to continue'); }
+function renderLevelUp(ctx)    { renderOverlayPlaceholder(ctx, `LEVEL ${state.level} — tap to continue`); }
 function renderBossWarning(ctx){ renderOverlayPlaceholder(ctx, 'BOSS INCOMING — tap to continue'); }
-function renderGameOver(ctx)   { renderOverlayPlaceholder(ctx, 'GAME OVER — tap to restart'); }
 function renderPaused(ctx)     { renderOverlayPlaceholder(ctx, 'PAUSED — tap to resume'); }
+
+function renderGameOver(ctx) {
+  ctx.fillStyle = 'rgba(20, 10, 4, 0.85)';
+  ctx.fillRect(0, 0, gameWidth, gameHeight);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const cx = gameWidth / 2;
+  const cy = gameHeight / 2;
+
+  ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
+  ctx.font = 'bold 48px serif';
+  ctx.fillText('GAME OVER', cx, cy - 90);
+
+  ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
+  ctx.fillRect(cx - 60, cy - 60, 120, 2);
+
+  ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
+  ctx.font = '22px monospace';
+  ctx.fillText(`Score    ${state.score.toLocaleString()}`, cx, cy - 20);
+  ctx.fillText(`Level    ${state.level}`, cx, cy + 14);
+  ctx.fillText(`Best     ${state.bestScore.toLocaleString()}`, cx, cy + 48);
+
+  const pulse = 0.5 + 0.5 * Math.sin(state.time / 400);
+  ctx.globalAlpha = 0.4 + 0.6 * pulse;
+  ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
+  ctx.font = '20px serif';
+  ctx.fillText('TAP TO CONTINUE', cx, cy + 110);
+  ctx.globalAlpha = 1;
+}
 
 function renderPlaying(ctx) {
   ctx.save();
   ctx.translate(state.shake.x, state.shake.y);
 
   renderGround(ctx);
-  // renderEntities(ctx) — Prompt 4
+  renderEntities(ctx);
   renderBolts(ctx);
   renderWall(ctx);
+  renderWallFlash(ctx);
   for (const b of state.ballistae) renderBallista(ctx, b);
   // renderParticles(ctx) — Prompt 6
 
@@ -649,7 +1051,12 @@ function update(dt) {
   if (state.screen === 'PLAYING' && !state.paused) {
     updateBallistae(dt);
     updateBolts(dt);
-    // TODO Prompt 4+: entity/wave updates
+    updateEntities(dt);
+    checkCollisions();
+    updateWaveState(dt);
+    if (state.wallFlash > 0) {
+      state.wallFlash = Math.max(0, state.wallFlash - dt / 1000);
+    }
   }
 }
 
