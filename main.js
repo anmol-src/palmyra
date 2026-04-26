@@ -34,7 +34,7 @@ const state = {
   entities: [], bolts: [], particles: [], popups: [],
   ballistae: [], powerUps: [null, null, null], collectibles: [],
   shake: { x: 0, y: 0, intensity: 0, duration: 0 },
-  ambientParticles: [], wallFlash: 0,
+  ambientParticles: [], sparkles: [], sparkleTimer: 0.7, wallFlash: 0,
   time: 0, deltaTime: 0, lastTime: 0,
   firstPlay: true, paused: false, fireBoltsTimer: 0,
 };
@@ -75,6 +75,7 @@ function resize() {
   walkwayHeight = Math.floor(wallHeight * 0.4);
 
   generateDecorations();
+  initAmbientParticles();
 
   if (state.ballistae.length === 0) {
     initBallistae();
@@ -198,8 +199,10 @@ function handleInput(clientX, clientY) {
       state.bolts = [];
       state.particles = [];
       state.popups = [];
+      state.sparkles = [];
       state.collectibles = [];
       state.wallFlash = 0;
+      state.shake.x = 0; state.shake.y = 0; state.shake.intensity = 0; state.shake.duration = 0;
       waveSpawnQueue = [];
       waveSpawnTimer = 0;
       betweenWaves = false;
@@ -580,8 +583,13 @@ function renderEntities(ctx) {
   const sorted = state.entities.filter(e => e.alive).slice().sort((a, b) => a.y - b.y);
   for (const e of sorted) {
     if (e.crumbling) {
+      const maxCrumble = e.type === 'siegeTower' ? 0.4 : 0.3;
+      const t = Math.max(0, e.crumbleTimer / maxCrumble);
       ctx.save();
-      ctx.globalAlpha = Math.max(0, e.crumbleTimer / 0.3);
+      ctx.globalAlpha = t;
+      ctx.translate(e.x, e.y);
+      ctx.scale(1, t);
+      ctx.translate(-e.x, -e.y);
       renderEntity(ctx, e);
       ctx.restore();
     } else {
@@ -714,10 +722,303 @@ function renderWall(ctx) {
 }
 
 // ============ PARTICLE SYSTEM ============
-// TODO Prompt 6
+
+function spawnParticle(config) {
+  if (state.particles.length >= 200) return;
+  state.particles.push({
+    x: config.x, y: config.y,
+    vx: config.vx || 0, vy: config.vy || 0,
+    life: config.life || 0.5, maxLife: config.life || 0.5,
+    size: config.size || 3,
+    color: config.color || CONFIG.COLORS.DUST,
+    alpha: config.alpha != null ? config.alpha : 1,
+    type: config.type || 'circle',
+    rotation: config.rotation || 0,
+    rotationSpeed: config.rotationSpeed || 0,
+    growRate: config.growRate || 0,
+  });
+}
+
+function updateParticles(dt) {
+  if (state.deltaTime > 20 && state.particles.length > 100) {
+    state.particles.splice(0, state.particles.length - 100);
+  }
+  for (let i = state.particles.length - 1; i >= 0; i--) {
+    const p = state.particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt;
+    p.rotation += p.rotationSpeed * dt;
+    if (p.growRate) p.size += p.growRate * dt;
+    if (p.life <= 0) state.particles.splice(i, 1);
+  }
+}
+
+function renderParticles(ctx) {
+  for (const p of state.particles) {
+    const alpha = p.alpha * Math.max(0, p.life / p.maxLife);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rotation);
+    if (p.type === 'rect') {
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+    } else {
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(0.1, p.size), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function spawnDust(x, y) {
+  spawnParticle({
+    x, y,
+    vx: (Math.random() - 0.5) * 30,
+    vy: (Math.random() - 0.5) * 10,
+    life: 0.4 + Math.random() * 0.2,
+    size: 2 + Math.random() * 2,
+    color: CONFIG.COLORS.DUST,
+    alpha: 0.3,
+  });
+}
+
+function spawnImpactBurst(x, y, palette, count) {
+  const colors = Array.isArray(palette) ? palette : [palette];
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 80 + Math.random() * 120;
+    spawnParticle({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.3 + Math.random() * 0.2,
+      size: 2 + Math.random() * 3,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      type: Math.random() < 0.5 ? 'rect' : 'circle',
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 10,
+    });
+  }
+}
+
+function spawnWallDebris(x, y) {
+  const colors = [CONFIG.COLORS.WALL_DARK, CONFIG.COLORS.WALL_BRICK, CONFIG.COLORS.WALL_STONE, CONFIG.COLORS.SHIELD_RED];
+  for (let i = 0; i < 10; i++) {
+    spawnParticle({
+      x: x + (Math.random() - 0.5) * 40,
+      y,
+      vx: (Math.random() - 0.5) * 200,
+      vy: -100 - Math.random() * 100,
+      life: 0.5 + Math.random() * 0.3,
+      size: 3 + Math.random() * 3,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      type: 'rect',
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 8,
+    });
+  }
+}
+
+function spawnSmoke(x, y) {
+  spawnParticle({
+    x, y,
+    vx: (Math.random() - 0.5) * 20,
+    vy: -30 - Math.random() * 30,
+    life: 0.8 + Math.random() * 0.4,
+    size: 4 + Math.random() * 4,
+    color: 'rgb(100,100,100)',
+    growRate: 8,
+    alpha: 0.4,
+  });
+}
 
 // ============ JUICE EFFECTS ============
-// TODO Prompt 6
+
+function triggerShake(intensity, duration) {
+  state.shake.intensity = Math.max(state.shake.intensity, intensity);
+  state.shake.duration = Math.max(state.shake.duration, duration);
+}
+
+function updateShake(dt) {
+  if (state.shake.duration > 0) {
+    state.shake.x = (Math.random() - 0.5) * 2 * state.shake.intensity;
+    state.shake.y = (Math.random() - 0.5) * 2 * state.shake.intensity;
+    state.shake.duration -= dt;
+    state.shake.intensity *= CONFIG.SHAKE_DECAY;
+    if (state.shake.duration <= 0 || state.shake.intensity < 0.1) {
+      state.shake.duration = 0;
+      state.shake.intensity = 0;
+      state.shake.x = 0;
+      state.shake.y = 0;
+    }
+  } else {
+    state.shake.x = 0;
+    state.shake.y = 0;
+  }
+}
+
+function spawnPopup(text, x, y) {
+  state.popups.push({ text, x, y, alpha: 1, scale: 1.0, timer: 0.8, maxTimer: 0.8 });
+}
+
+function updatePopups(dt) {
+  for (let i = state.popups.length - 1; i >= 0; i--) {
+    const p = state.popups[i];
+    p.y -= 40 * dt;
+    p.scale = Math.min(1.3, p.scale + 0.5 * dt);
+    p.timer -= dt;
+    p.alpha = Math.max(0, p.timer / p.maxTimer);
+    if (p.timer <= 0) state.popups.splice(i, 1);
+  }
+}
+
+function renderPopups(ctx) {
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px monospace';
+  for (const p of state.popups) {
+    ctx.save();
+    ctx.globalAlpha = p.alpha;
+    ctx.translate(p.x, p.y);
+    ctx.scale(p.scale, p.scale);
+    ctx.fillStyle = CONFIG.COLORS.FLASH_GOLD;
+    ctx.fillText(p.text, 0, 0);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function entityKillColors(type) {
+  if (type === 'siegeTower') return [CONFIG.COLORS.WOOD_LIGHT, CONFIG.COLORS.WOOD_BROWN, '#cc6600'];
+  return [CONFIG.COLORS.SHIELD_RED, CONFIG.COLORS.GOLD, CONFIG.COLORS.FLASH_GOLD];
+}
+
+function entityCrumbleColor(entity) {
+  if (entity.type === 'siegeTower') return CONFIG.COLORS.WOOD_LIGHT;
+  return CONFIG.COLORS.SHIELD_RED;
+}
+
+function renderShadows(ctx) {
+  if (state.deltaTime > 20) return;
+  ctx.fillStyle = CONFIG.COLORS.SHADOW;
+  for (const e of state.entities) {
+    if (!e.alive || e.crumbling) continue;
+    const scale = entityScale(e);
+    const sizeMult = e.type === 'siegeTower' ? 1.5 : 1;
+    const rx = e.width * scale * 0.4 * sizeMult;
+    const ry = e.height * scale * 0.15 * sizeMult;
+    const cy = e.y + e.height * scale * 0.5 + 3;
+    ctx.beginPath();
+    ctx.ellipse(e.x, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function updateDustTrails(dt) {
+  for (const e of state.entities) {
+    if (!e.alive || e.crumbling) continue;
+    e.dustTimer -= dt;
+    if (e.dustTimer > 0) continue;
+    e.dustTimer = CONFIG.DUST_INTERVAL / 1000;
+    const scale = entityScale(e);
+    const baseY = e.y + e.height * scale * 0.45;
+    if (e.type === 'legionary') {
+      for (const s of e.soldiers) {
+        spawnParticle({
+          x: e.x + s.offsetX,
+          y: e.y + s.offsetY + 6,
+          vx: (Math.random() - 0.5) * 12,
+          vy: -3 - Math.random() * 4,
+          life: 0.3 + Math.random() * 0.2,
+          size: 1 + Math.random(),
+          color: CONFIG.COLORS.DUST,
+          alpha: 0.3,
+        });
+      }
+    } else if (e.type === 'testudo') {
+      spawnDust(e.x, baseY);
+    } else if (e.type === 'siegeTower') {
+      const halfW = e.width * scale * 0.35;
+      spawnDust(e.x - halfW, baseY);
+      spawnDust(e.x + halfW, baseY);
+    }
+  }
+}
+
+function initAmbientParticles() {
+  state.ambientParticles = [];
+  for (let i = 0; i < 25; i++) {
+    state.ambientParticles.push({
+      x: Math.random() * gameWidth,
+      y: Math.random() * wallY,
+      speed: 10 + Math.random() * 30,
+      size: 1 + Math.random(),
+      alpha: 0.15 + Math.random() * 0.2,
+    });
+  }
+}
+
+function updateAmbientParticles(dt) {
+  for (const p of state.ambientParticles) {
+    p.x += p.speed * dt;
+    if (p.x > gameWidth) p.x = 0;
+  }
+}
+
+function renderAmbientParticles(ctx) {
+  ctx.fillStyle = CONFIG.COLORS.DUST;
+  for (const p of state.ambientParticles) {
+    ctx.globalAlpha = p.alpha;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function updateSparkles(dt) {
+  state.sparkleTimer -= dt;
+  if (state.sparkleTimer <= 0) {
+    if (state.sparkles.length < 5 && state.deltaTime <= 20) {
+      state.sparkles.push({
+        x: Math.random() * gameWidth,
+        y: 60 + Math.random() * Math.max(60, wallY - 60),
+        alpha: 0,
+        phase: 'in',
+        timer: 0.15,
+      });
+    }
+    state.sparkleTimer = 0.5 + Math.random() * 0.5;
+  }
+  for (let i = state.sparkles.length - 1; i >= 0; i--) {
+    const s = state.sparkles[i];
+    s.timer -= dt;
+    if (s.phase === 'in') {
+      const t = 1 - Math.max(0, s.timer / 0.15);
+      s.alpha = t * 0.6;
+      if (s.timer <= 0) { s.phase = 'out'; s.timer = 0.15; }
+    } else {
+      const t = Math.max(0, s.timer / 0.15);
+      s.alpha = t * 0.6;
+      if (s.timer <= 0) state.sparkles.splice(i, 1);
+    }
+  }
+}
+
+function renderSparkles(ctx) {
+  ctx.fillStyle = CONFIG.COLORS.FLASH_GOLD;
+  for (const s of state.sparkles) {
+    ctx.globalAlpha = s.alpha;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
 
 // ============ WAVE SPAWNER ============
 let waveSpawnQueue = [];
@@ -865,9 +1166,7 @@ function updateWaveState(dt) {
     if (state.waveDamage === 0) {
       const bonus = CONFIG.PERFECT_WAVE_BONUS * state.multiplier;
       state.score += bonus;
-      if (typeof spawnPopup === 'function') {
-        spawnPopup(gameWidth / 2, wallY - 40, `PERFECT +${bonus}`);
-      }
+      spawnPopup(`PERFECT +${bonus}`, gameWidth / 2, wallY - 40);
     }
 
     state.wave += 1;
@@ -898,6 +1197,8 @@ function startGame() {
   state.bolts = [];
   state.particles = [];
   state.popups = [];
+  state.sparkles = [];
+  state.sparkleTimer = 0.7;
   state.collectibles = [];
   state.wallFlash = 0;
   state.shake.x = 0; state.shake.y = 0; state.shake.intensity = 0; state.shake.duration = 0;
@@ -929,6 +1230,24 @@ function updateEntities(dt) {
 
     if (entity.crumbling) {
       entity.crumbleTimer -= dtSec;
+      const color = entityCrumbleColor(entity);
+      const halfW = entity.width * 0.4;
+      const halfH = entity.height * 0.4;
+      const burst = 2 + Math.floor(Math.random() * 2);
+      for (let k = 0; k < burst; k++) {
+        spawnParticle({
+          x: entity.x + (Math.random() - 0.5) * halfW * 2,
+          y: entity.y + (Math.random() - 0.5) * halfH * 2,
+          vx: (Math.random() - 0.5) * 80,
+          vy: -50 - Math.random() * 80,
+          size: 2 + Math.random() * 3,
+          color,
+          type: 'rect',
+          life: 0.4 + Math.random() * 0.3,
+          rotation: Math.random() * Math.PI * 2,
+          rotationSpeed: (Math.random() - 0.5) * 6,
+        });
+      }
       if (entity.crumbleTimer <= 0) entity.alive = false;
       continue;
     }
@@ -974,9 +1293,19 @@ function checkCollisions() {
         entity.hp -= 1;
         entity.flashTimer = 0.05;
 
+        // Impact flash circle — small bright dot that swells and fades
+        spawnParticle({
+          x: bolt.x, y: bolt.y, size: 1,
+          color: CONFIG.COLORS.FLASH_GOLD,
+          life: 0.2, alpha: 0.8, growRate: 60,
+        });
+
         if (entity.hp > 0) {
+          // Hit but not killed
           if (entity.type === 'testudo') {
             generateCrack(entity);
+            triggerShake(2, 0.1);
+            spawnImpactBurst(bolt.x, bolt.y, entityKillColors('testudo'), 6);
           } else if (entity.type === 'siegeTower') {
             entity.scorchMarks.push({
               x: Math.random() * 50 + 10,
@@ -984,6 +1313,9 @@ function checkCollisions() {
               r: 5 + Math.random() * 8,
             });
             if (entity.hp <= 2) entity.smoking = true;
+            triggerShake(3, 0.15);
+            spawnImpactBurst(bolt.x, bolt.y, entityKillColors('siegeTower'), 8);
+            spawnSmoke(entity.x, entity.y - entity.height * 0.3);
           }
         }
 
@@ -999,10 +1331,16 @@ function checkCollisions() {
             state.multiplier += 1;
           }
 
-          if (typeof spawnPopup === 'function') {
-            spawnPopup(entity.x, entity.y, `+${earned}`);
-          }
-          if (typeof triggerShake === 'function') {
+          spawnPopup(`+${earned}`, entity.x, entity.y);
+
+          if (entity.type === 'siegeTower') {
+            spawnImpactBurst(entity.x, entity.y, entityKillColors('siegeTower'), 12);
+            triggerShake(8, 0.3);
+          } else if (entity.type === 'testudo') {
+            spawnImpactBurst(entity.x, entity.y, entityKillColors('testudo'), 10);
+            triggerShake(4, 0.2);
+          } else {
+            spawnImpactBurst(bolt.x, bolt.y, entityKillColors('legionary'), 8);
             triggerShake(2, 0.1);
           }
         }
@@ -1025,7 +1363,9 @@ function checkCollisions() {
       state.waveDamage += damage;
       state.wallFlash = 0.3;
 
-      if (typeof triggerShake === 'function') triggerShake(entity.type === 'siegeTower' ? 6 : 4, 0.2);
+      const isSiege = entity.type === 'siegeTower';
+      triggerShake(isSiege ? 10 : 5, isSiege ? 0.4 : 0.25);
+      spawnWallDebris(entity.x, wallY);
 
       if (state.hearts <= 0) {
         state.hearts = 0;
@@ -1465,15 +1805,22 @@ function renderGameOver(ctx) {
 
 function renderPlaying(ctx) {
   ctx.save();
-  ctx.translate(state.shake.x, state.shake.y);
+
+  const hasTower = state.entities.some(e => e.type === 'siegeTower' && e.alive && !e.crumbling);
+  const towerVibe = hasTower ? Math.sin(state.time / 1000 * 3) * 1 : 0;
+  ctx.translate(state.shake.x + towerVibe, state.shake.y);
 
   renderGround(ctx);
+  renderAmbientParticles(ctx);
+  renderSparkles(ctx);
+  renderShadows(ctx);
   renderEntities(ctx);
   renderBolts(ctx);
+  renderParticles(ctx);
   renderWall(ctx);
   renderWallFlash(ctx);
   for (const b of state.ballistae) renderBallista(ctx, b);
-  // renderParticles(ctx) — Prompt 6
+  renderPopups(ctx);
 
   ctx.restore();
 
@@ -1483,14 +1830,24 @@ function renderPlaying(ctx) {
 // ============ MAIN LOOP ============
 function update(dt) {
   state.time += dt;
+  const dtSec = dt / 1000;
+
+  // Ambient atmosphere keeps drifting on every screen so the world feels alive
+  updateAmbientParticles(dtSec);
+
   if (state.screen === 'PLAYING' && !state.paused) {
     updateBallistae(dt);
     updateBolts(dt);
     updateEntities(dt);
     checkCollisions();
     updateWaveState(dt);
+    updateDustTrails(dtSec);
+    updateShake(dtSec);
+    updateParticles(dtSec);
+    updatePopups(dtSec);
+    updateSparkles(dtSec);
     if (state.wallFlash > 0) {
-      state.wallFlash = Math.max(0, state.wallFlash - dt / 1000);
+      state.wallFlash = Math.max(0, state.wallFlash - dtSec);
     }
   }
 }
