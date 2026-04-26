@@ -1,0 +1,12 @@
+[Unit]
+Description=Palmyra Leaderboard API
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/var/www/palmyra/api
+ExecStart=/var/www/palmyra/api/venv/bin/gunicorn palmyra_api.wsgi:application --bind 127.0.0.1:8003 --workers 2
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

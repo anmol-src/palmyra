@@ -50,6 +50,11 @@ const state = {
   firstPlay: true, paused: false, fireBoltsTimer: 0,
   briefingPage: 0,
   callsign: '',
+  leaderboardData: null,
+  saveStatus: '',
+  myRank: null,
+  saveInFlight: false,
+  scoreSubmitted: false,
 };
 
 // ============ CANVAS SETUP ============
@@ -178,6 +183,7 @@ function handleGameplayTap(x, y) {
       if (slot !== -1 && !state.powerUps.some(p => p && p.id === c.type.id)) {
         state.powerUps[slot] = c.type;
         spawnImpactBurst(c.x, c.y, [c.type.color, '#ffffff'], 14);
+        AudioManager.play('powerup_collect');
       }
       state.collectibles.splice(i, 1);
       return;
@@ -212,8 +218,18 @@ function handleGameplayTap(x, y) {
 }
 
 function handleInput(clientX, clientY) {
+  AudioManager.init();
   const { x, y } = getGameCoords(clientX, clientY);
   if (x < 0 || x > gameWidth || y < 0 || y > gameHeight) return;
+
+  // Sound toggle button — top-right HUD, only active during gameplay-related screens
+  if (state.screen === 'PLAYING' || state.screen === 'PAUSED' || state.screen === 'LEVEL_UP' || state.screen === 'BOSS_WARNING') {
+    const tb = soundToggleBounds();
+    if (pointInRect(x, y, tb)) {
+      AudioManager.toggle();
+      return;
+    }
+  }
 
   switch (state.screen) {
     case 'TITLE':
@@ -284,6 +300,11 @@ function resetToTitle() {
   waveSpawnTimer = 0;
   betweenWaves = false;
   betweenWaveTimer = 0;
+  state.leaderboardData = null;
+  state.saveStatus = '';
+  state.myRank = null;
+  state.saveInFlight = false;
+  state.scoreSubmitted = false;
 }
 
 function handleGameOverTap(x, y) {
@@ -292,6 +313,7 @@ function handleGameOverTap(x, y) {
     const name = prompt('Enter your callsign:', state.callsign || '');
     if (name) {
       state.callsign = name.replace(/[^a-zA-Z0-9 ]/g, '').trim().substring(0, 20);
+      if (state.callsign) trySubmitAndRefresh();
     }
     return;
   }
@@ -308,6 +330,7 @@ function handleGameOverTap(x, y) {
     resetToTitle();
     return;
   }
+  // Any tap outside known buttons does nothing — prevents accidental restart
 }
 
 function pointInRect(x, y, r) {
@@ -836,8 +859,8 @@ function spawnParticle(config) {
 }
 
 function updateParticles(dt) {
-  if (state.deltaTime > 20 && state.particles.length > 100) {
-    state.particles.splice(0, state.particles.length - 100);
+  if (state.particles.length > 200) {
+    state.particles.splice(0, state.particles.length - 200);
   }
   for (let i = state.particles.length - 1; i >= 0; i--) {
     const p = state.particles[i];
@@ -1272,6 +1295,7 @@ function updateWaveState(dt) {
       state.waveDamage = 0;
       const nextIsBoss = state.level % CONFIG.BOSS_INTERVAL === 0;
       state.screen = nextIsBoss ? 'BOSS_WARNING' : 'LEVEL_UP';
+      AudioManager.play(nextIsBoss ? 'boss_warning' : 'levelup');
     } else {
       betweenWaves = true;
       betweenWaveTimer = CONFIG.WAVE_PAUSE / 1000;
@@ -1308,6 +1332,11 @@ function startGame() {
   waveSpawnTimer = 0;
   betweenWaves = false;
   betweenWaveTimer = 0;
+  state.leaderboardData = null;
+  state.saveStatus = '';
+  state.myRank = null;
+  state.saveInFlight = false;
+  state.scoreSubmitted = false;
   initBallistae();
   spawnWave();
   state.screen = 'PLAYING';
@@ -1379,6 +1408,7 @@ function updateEntities(dt) {
   }
 
   state.entities = state.entities.filter(e => e.alive);
+  if (state.entities.length > 50) state.entities.length = 50;
 }
 
 function applyHitToEntity(entity, impactX, impactY) {
@@ -1390,6 +1420,7 @@ function applyHitToEntity(entity, impactX, impactY) {
       generateCrack(entity);
       triggerShake(2, 0.1);
       spawnImpactBurst(impactX, impactY, entityKillColors('testudo'), 6);
+      AudioManager.play('impact_heavy');
     } else if (entity.type === 'siegeTower') {
       entity.scorchMarks.push({
         x: Math.random() * 50 + 10,
@@ -1400,6 +1431,9 @@ function applyHitToEntity(entity, impactX, impactY) {
       triggerShake(3, 0.15);
       spawnImpactBurst(impactX, impactY, entityKillColors('siegeTower'), 8);
       spawnSmoke(entity.x, entity.y - entity.height * 0.3);
+      AudioManager.play('impact_wood');
+    } else {
+      AudioManager.play('impact_light');
     }
   }
 
@@ -1420,12 +1454,15 @@ function applyHitToEntity(entity, impactX, impactY) {
     if (entity.type === 'siegeTower') {
       spawnImpactBurst(entity.x, entity.y, entityKillColors('siegeTower'), 12);
       triggerShake(8, 0.3);
+      AudioManager.play('collapse');
     } else if (entity.type === 'testudo') {
       spawnImpactBurst(entity.x, entity.y, entityKillColors('testudo'), 10);
       triggerShake(4, 0.2);
+      AudioManager.play('kill');
     } else {
       spawnImpactBurst(impactX, impactY, entityKillColors('legionary'), 8);
       triggerShake(2, 0.1);
+      AudioManager.play('kill');
     }
   }
 }
@@ -1484,6 +1521,8 @@ function checkCollisions() {
       const isSiege = entity.type === 'siegeTower';
       triggerShake(isSiege ? 10 : 5, isSiege ? 0.4 : 0.25);
       spawnWallDebris(entity.x, wallY);
+      AudioManager.play('wall_hit');
+      AudioManager.play('heart_lost');
 
       if (state.hearts <= 0) {
         state.hearts = 0;
@@ -1491,6 +1530,13 @@ function checkCollisions() {
           state.bestScore = state.score;
           try { localStorage.setItem('palmyra_best', String(state.bestScore)); } catch (e) {}
         }
+        AudioManager.play('gameover');
+        state.leaderboardData = null;
+        state.saveStatus = '';
+        state.myRank = null;
+        state.scoreSubmitted = false;
+        state.saveInFlight = false;
+        refreshLeaderboard();
         state.screen = 'GAME_OVER';
       }
     }
@@ -1557,16 +1603,27 @@ function renderHUD(ctx) {
   ctx.fillText(`${state.wave}/${CONFIG.WAVES_PER_LEVEL}`, cx, 32);
   ctx.restore();
 
-  // Right — hearts ending at gameWidth-30, 20px apart
+  // Right — hearts ending at heartEnd, 20px apart (leaves room for sound toggle)
   ctx.textAlign = 'center';
   ctx.font = '18px monospace';
-  const heartEnd = gameWidth - 30;
+  const heartEnd = gameWidth - 60;
   for (let n = 1; n <= CONFIG.MAX_HEARTS; n++) {
     const x = heartEnd - (CONFIG.MAX_HEARTS - n) * 20;
     const filled = n <= state.hearts;
     ctx.fillStyle = filled ? CONFIG.COLORS.HEART_RED : CONFIG.COLORS.HEART_GREY;
     ctx.fillText('♥', x, 16);
   }
+
+  // Sound toggle button — far right
+  const tb = soundToggleBounds();
+  ctx.save();
+  ctx.globalAlpha = AudioManager.enabled ? 0.85 : 0.4;
+  ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
+  ctx.font = '20px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(AudioManager.enabled ? '🔊' : '🔇', tb.x + tb.w / 2, tb.y + tb.h / 2);
+  ctx.restore();
 
   // Power-up rail — 3 slots stacked at the right edge
   for (let i = 0; i < 3; i++) {
@@ -1709,6 +1766,7 @@ function activatePowerUp(slotIndex) {
   const power = state.powerUps[slotIndex];
   if (!power) return;
   state.powerUps[slotIndex] = null;
+  AudioManager.play('powerup_activate');
 
   if (power.id === 'WALL_REPAIR') {
     state.hearts = Math.min(state.hearts + 2, CONFIG.MAX_HEARTS);
@@ -1954,10 +2012,121 @@ function renderBriefing(ctx) {
 }
 
 // ============ AUDIO ============
-// TODO Prompt 8
+const AudioManager = {
+  sounds: {},
+  enabled: true,
+  initialized: false,
+
+  init() {
+    if (this.initialized) return;
+    const files = {
+      fire: 'assets/audio/fire.mp3',
+      impact_light: 'assets/audio/impact_light.mp3',
+      impact_heavy: 'assets/audio/impact_heavy.mp3',
+      impact_wood: 'assets/audio/impact_wood.mp3',
+      wall_hit: 'assets/audio/wall_hit.mp3',
+      kill: 'assets/audio/kill.mp3',
+      collapse: 'assets/audio/collapse.mp3',
+      powerup_collect: 'assets/audio/powerup_collect.mp3',
+      powerup_activate: 'assets/audio/powerup_activate.mp3',
+      levelup: 'assets/audio/levelup.mp3',
+      boss_warning: 'assets/audio/boss_warning.mp3',
+      heart_lost: 'assets/audio/heart_lost.mp3',
+      gameover: 'assets/audio/gameover.mp3',
+    };
+    for (const [key, src] of Object.entries(files)) {
+      try {
+        const audio = new Audio();
+        audio.src = src;
+        audio.preload = 'auto';
+        audio.volume = 0.5;
+        this.sounds[key] = audio;
+      } catch (e) {}
+    }
+    try {
+      const stored = localStorage.getItem('palmyra_audio');
+      if (stored === '0') this.enabled = false;
+    } catch (e) {}
+    this.initialized = true;
+  },
+
+  play(name) {
+    if (!this.enabled) return;
+    if (!this.initialized) this.init();
+    const s = this.sounds[name];
+    if (!s) return;
+    try {
+      if (s.currentTime > 0 && !s.ended) {
+        const clone = s.cloneNode();
+        clone.volume = s.volume;
+        clone.play().catch(() => {});
+        return;
+      }
+      s.currentTime = 0;
+      s.play().catch(() => {});
+    } catch (e) {}
+  },
+
+  toggle() {
+    this.enabled = !this.enabled;
+    try { localStorage.setItem('palmyra_audio', this.enabled ? '1' : '0'); } catch (e) {}
+    return this.enabled;
+  }
+};
 
 // ============ LEADERBOARD API ============
-// TODO Prompt 8
+const API_BASE = '/api';
+
+async function submitScore(callsign, score, level) {
+  try {
+    const resp = await fetch(API_BASE + '/score/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callsign, score, level }),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (e) {
+    console.warn('Score submit failed:', e);
+    return null;
+  }
+}
+
+async function getLeaderboard() {
+  try {
+    const resp = await fetch(API_BASE + '/leaderboard/');
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return data.leaderboard || [];
+  } catch (e) {
+    console.warn('Leaderboard fetch failed:', e);
+    return [];
+  }
+}
+
+async function refreshLeaderboard() {
+  const data = await getLeaderboard();
+  state.leaderboardData = data;
+}
+
+async function trySubmitAndRefresh() {
+  if (!state.callsign || state.saveInFlight || state.scoreSubmitted) return;
+  state.saveInFlight = true;
+  state.saveStatus = 'Saving...';
+  const result = await submitScore(state.callsign, state.score, state.level);
+  state.saveInFlight = false;
+  if (result && typeof result.rank === 'number') {
+    state.myRank = result.rank;
+    state.saveStatus = `Saved! Rank #${result.rank}`;
+    state.scoreSubmitted = true;
+  } else if (result) {
+    state.saveStatus = 'Saved!';
+    state.scoreSubmitted = true;
+  } else {
+    state.saveStatus = 'Save failed';
+  }
+  refreshLeaderboard();
+}
 
 // ============ BALLISTAE ============
 function ballistaPosition(i) {
@@ -2037,6 +2206,7 @@ function fireBoltFromNearest(targetX, targetY) {
   state.bolts.push(createBolt(nearest.x, nearest.y, targetX, targetY));
   nearest.cooldownUntil = now + CONFIG.BALLISTA_COOLDOWN;
   nearest.recoilTimer = 150;
+  AudioManager.play('fire');
   return true;
 }
 
@@ -2052,9 +2222,10 @@ function updateBolts(dt) {
     bolt.y += (dy / dist) * move;
     bolt.trail.unshift({x: bolt.x, y: bolt.y});
     if (bolt.trail.length > 6) bolt.trail.length = 6;
-    if (bolt.y < -50) bolt.alive = false;
+    if (bolt.y < -100 || bolt.y > gameHeight + 100) bolt.alive = false;
   }
   state.bolts = state.bolts.filter(b => b.alive);
+  if (state.bolts.length > 20) state.bolts.length = 20;
 }
 
 function renderBolts(ctx) {
@@ -2148,8 +2319,20 @@ function renderTitle(ctx) {
   ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
   ctx.fillRect(cx - 50, titleY + 68, 100, 2);
 
-  const pulse = 0.5 + 0.5 * Math.sin(state.time / 400);
-  ctx.globalAlpha = 0.4 + 0.6 * pulse;
+  if (state.bestScore > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
+    ctx.font = '16px monospace';
+    ctx.fillText(`BEST: ${state.bestScore.toLocaleString()}`, cx, titleY + 96);
+    ctx.restore();
+  }
+
+  // Smoother breathing pulse using cosine-eased sine
+  const raw = Math.sin(state.time / 600);
+  const pulse = 0.5 + 0.5 * raw;
+  const eased = pulse * pulse * (3 - 2 * pulse);
+  ctx.globalAlpha = 0.45 + 0.55 * eased;
   ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
   ctx.font = '28px serif';
   ctx.fillText('TAP TO PLAY', cx, gameHeight * 0.62);
@@ -2258,18 +2441,26 @@ function renderBossWarning(ctx) {
 
 function renderPaused(ctx)     { renderOverlayPlaceholder(ctx, 'PAUSED — tap to resume'); }
 
+function soundToggleBounds() {
+  const w = 36, h = 36;
+  return { x: gameWidth - w - 6, y: 7, w, h };
+}
+
 function gameOverButtons() {
   const cx = gameWidth / 2;
-  const cy = gameHeight / 2;
   const inputW = 250, inputH = 36;
   const shareW = Math.min(gameWidth * 0.7, 360), shareH = 44;
   const btnW = (shareW - 12) / 2, btnH = 40;
 
+  const callsignY = gameHeight * 0.34;
+  const shareY    = gameHeight * 0.44;
+  const buttonsY  = gameHeight * 0.87;
+
   return {
-    callsign: { x: cx - inputW / 2, y: cy + 70,  w: inputW, h: inputH },
-    share:    { x: cx - shareW / 2, y: cy + 122, w: shareW, h: shareH },
-    again:    { x: cx - shareW / 2,        y: cy + 178, w: btnW,  h: btnH },
-    menu:     { x: cx - shareW / 2 + btnW + 12, y: cy + 178, w: btnW,  h: btnH },
+    callsign: { x: cx - inputW / 2, y: callsignY, w: inputW, h: inputH },
+    share:    { x: cx - shareW / 2, y: shareY,    w: shareW, h: shareH },
+    again:    { x: cx - shareW / 2,                y: buttonsY, w: btnW, h: btnH },
+    menu:     { x: cx - shareW / 2 + btnW + 12,    y: buttonsY, w: btnW, h: btnH },
   };
 }
 
@@ -2291,21 +2482,22 @@ function renderGameOver(ctx) {
   ctx.textBaseline = 'middle';
 
   const cx = gameWidth / 2;
-  const cy = gameHeight / 2;
+  const titleY = gameHeight * 0.10;
+  const scoreY = gameHeight * 0.18;
 
   ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
   ctx.font = 'bold 44px serif';
-  ctx.fillText('GAME OVER', cx, cy - 130);
+  ctx.fillText('GAME OVER', cx, titleY);
 
   ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
-  ctx.fillRect(cx - 60, cy - 102, 120, 2);
+  ctx.fillRect(cx - 60, titleY + 28, 120, 2);
 
   // Battle report
   ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
   ctx.font = '20px monospace';
-  ctx.fillText(`Score    ${state.score.toLocaleString()}`, cx, cy - 60);
-  ctx.fillText(`Level    ${state.level}`, cx, cy - 32);
-  ctx.fillText(`Best     ${state.bestScore.toLocaleString()}`, cx, cy - 4);
+  ctx.fillText(`Score    ${state.score.toLocaleString()}`, cx, scoreY);
+  ctx.fillText(`Level    ${state.level}`, cx, scoreY + 28);
+  ctx.fillText(`Best     ${state.bestScore.toLocaleString()}`, cx, scoreY + 56);
 
   const b = gameOverButtons();
 
@@ -2339,6 +2531,15 @@ function renderGameOver(ctx) {
     ctx.restore();
   }
 
+  // Save status (between callsign and share button)
+  if (state.saveStatus) {
+    ctx.save();
+    ctx.fillStyle = state.saveStatus === 'Save failed' ? '#cc6666' : CONFIG.COLORS.UI_GOLD;
+    ctx.font = '13px monospace';
+    ctx.fillText(state.saveStatus, cx, b.callsign.y + b.callsign.h + 14);
+    ctx.restore();
+  }
+
   // WhatsApp share button
   ctx.fillStyle = '#25D366';
   drawRoundedRect(ctx, b.share.x, b.share.y, b.share.w, b.share.h, 10);
@@ -2346,6 +2547,9 @@ function renderGameOver(ctx) {
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 16px monospace';
   ctx.fillText('Share on WhatsApp 💬', cx, b.share.y + b.share.h / 2);
+
+  // Leaderboard — top 10
+  renderLeaderboardPanel(ctx, b);
 
   // Play Again
   ctx.fillStyle = '#4ecdc4';
@@ -2365,6 +2569,116 @@ function renderGameOver(ctx) {
   ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
   ctx.font = 'bold 14px monospace';
   ctx.fillText('MAIN MENU', b.menu.x + b.menu.w / 2, b.menu.y + b.menu.h / 2);
+  ctx.restore();
+}
+
+function renderLeaderboardPanel(ctx, b) {
+  const cx = gameWidth / 2;
+  const headerY = b.share.y + b.share.h + 24;
+  const panelW = Math.min(gameWidth * 0.8, 380);
+  const panelX = cx - panelW / 2;
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = CONFIG.COLORS.UI_GOLD;
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText('🏆 TOP 100 GLOBAL', cx, headerY);
+  ctx.restore();
+
+  const data = state.leaderboardData;
+
+  if (data === null) {
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Loading…', cx, headerY + 24);
+    ctx.restore();
+    return;
+  }
+
+  if (!Array.isArray(data) || data.length === 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Leaderboard unavailable', cx, headerY + 24);
+    ctx.restore();
+    return;
+  }
+
+  const rows = data.slice(0, 10);
+  const rowH = 16;
+  const startY = headerY + 18;
+  const maxBottom = b.again.y - 12;
+  const visibleRows = Math.max(3, Math.min(rows.length, Math.floor((maxBottom - startY) / rowH)));
+
+  ctx.save();
+  ctx.font = '13px monospace';
+  ctx.textBaseline = 'middle';
+
+  for (let i = 0; i < visibleRows; i++) {
+    const entry = rows[i];
+    const rowY = startY + i * rowH;
+    const isMe = state.myRank && entry.rank === state.myRank
+      && entry.callsign === state.callsign && entry.score === state.score;
+
+    if (isMe) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(218, 165, 32, 0.18)';
+      ctx.fillRect(panelX, rowY - rowH / 2 + 1, panelW, rowH - 2);
+      ctx.restore();
+    }
+
+    const rankColor = entry.rank <= 3 ? CONFIG.COLORS.UI_GOLD : CONFIG.COLORS.UI_TEXT;
+    ctx.fillStyle = rankColor;
+    ctx.textAlign = 'left';
+    ctx.fillText(`#${entry.rank}`, panelX + 10, rowY);
+
+    ctx.fillStyle = isMe ? '#ffffff' : CONFIG.COLORS.UI_TEXT;
+    ctx.textAlign = 'left';
+    const callsign = (entry.callsign || '').substring(0, 14);
+    ctx.fillText(callsign, panelX + 60, rowY);
+
+    ctx.fillStyle = isMe ? '#ffffff' : CONFIG.COLORS.UI_GOLD;
+    ctx.textAlign = 'right';
+    ctx.fillText((entry.score || 0).toLocaleString(), panelX + panelW - 10, rowY);
+  }
+  ctx.restore();
+}
+
+function renderBorderFrame(ctx) {
+  if (SPRITES.borderFrame) {
+    ctx.drawImage(SPRITES.borderFrame, 0, 0, gameWidth, gameHeight);
+    return;
+  }
+
+  const bw = 6;
+
+  ctx.save();
+  ctx.strokeStyle = '#8b3a2a';
+  ctx.lineWidth = bw;
+  ctx.strokeRect(bw / 2, bw / 2, gameWidth - bw, gameHeight - bw);
+
+  ctx.strokeStyle = '#6b2a1a';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(bw + 2, bw + 2, gameWidth - bw * 2 - 4, gameHeight - bw * 2 - 4);
+
+  const cs = 10;
+  ctx.fillStyle = '#8b3a2a';
+  [
+    [bw, bw],
+    [gameWidth - bw - cs, bw],
+    [bw, gameHeight - bw - cs],
+    [gameWidth - bw - cs, gameHeight - bw - cs],
+  ].forEach(([x, y]) => {
+    ctx.fillRect(x, y, cs, cs);
+  });
   ctx.restore();
 }
 
@@ -2437,6 +2751,8 @@ function render() {
     case 'PAUSED':        renderPlaying(ctx); renderPaused(ctx); break;
     default:              renderTitle(ctx);
   }
+
+  renderBorderFrame(ctx);
 }
 
 function gameLoop(timestamp) {
@@ -2468,6 +2784,8 @@ function init() {
   }, { passive: false });
   canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('dblclick', (e) => e.preventDefault());
+  canvas.addEventListener('gesturestart', (e) => e.preventDefault());
 
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
