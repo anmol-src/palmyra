@@ -162,8 +162,8 @@ const USE_SPRITE = {
   legionary: false,
   testudo: false,
   siegeTower: false,
-  wall: true,
-  city: true,
+  wall: false,
+  city: false,
   mosaic_tile: true,
 };
 
@@ -831,117 +831,138 @@ function renderGround(ctx) {
 }
 
 function renderWall(ctx) {
-  if (USE_SPRITE.wall && SPRITES.wall) {
-    // Solid fill behind the entire wall/city zone — kills any white strip
-    // showing through transparent gaps in the PNGs (extend a few px above
-    // wallY to cover the seam with the battlefield).
-    ctx.fillStyle = '#5a3820';
-    ctx.fillRect(0, wallY - 5, gameWidth, gameHeight - wallY + 5);
+  const wallTop = wallY;
+  const totalWallHeight = gameHeight - wallY;
 
-    // Stretch the wall PNG to full width for the battlements + walkway only.
-    const wallImgHeight = gameHeight * 0.08;
-    ctx.drawImage(SPRITES.wall, 0, wallY, gameWidth, wallImgHeight);
+  // 1. SOLID FILL — covers everything, kills any possible white gaps
+  ctx.fillStyle = '#3d2414';
+  ctx.fillRect(0, wallTop, gameWidth, totalWallHeight);
 
-    // Code-drawn brick face directly below the PNG section.
-    const brickH = gameHeight * 0.05;
-    const brickY = wallY + wallImgHeight;
-    ctx.fillStyle = '#6b4423';
-    ctx.fillRect(0, brickY, gameWidth, brickH);
-    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-    ctx.lineWidth = 1;
-    for (let by = brickY; by < brickY + brickH; by += 12) {
-      ctx.beginPath();
-      ctx.moveTo(0, by);
-      ctx.lineTo(gameWidth, by);
-      ctx.stroke();
-    }
+  // 2. WALKWAY — the top section where ballistae sit
+  const walkwayHeightLocal = totalWallHeight * 0.2;
+  ctx.fillStyle = '#8a7560';
+  ctx.fillRect(0, wallTop, gameWidth, walkwayHeightLocal);
 
-    // City strip below, stretched full width to fill remaining bottom area.
-    if (USE_SPRITE.city && SPRITES.city) {
-      const cityY = brickY + brickH;
-      const cityH = gameHeight - cityY;
-      ctx.drawImage(SPRITES.city, 0, cityY, gameWidth, cityH);
-    }
-    return;
-  }
-
-  // Walkway body
-  ctx.fillStyle = CONFIG.COLORS.WALL_STONE;
-  ctx.fillRect(0, wallY, gameWidth, walkwayHeight);
-
-  // Stone block texture
-  ctx.save();
-  ctx.globalAlpha = 0.30;
-  ctx.strokeStyle = CONFIG.COLORS.WALL_DARK;
-  ctx.lineWidth = 0.6;
-  const courseH = 17;
-  for (let y = wallY + courseH; y < wallY + walkwayHeight; y += courseH) {
+  // Stone block texture on walkway
+  ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+  ctx.lineWidth = 0.5;
+  for (let y = wallTop; y < wallTop + walkwayHeightLocal; y += 14) {
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(gameWidth, y);
     ctx.stroke();
   }
-  let row = 0;
-  for (let y = wallY; y < wallY + walkwayHeight; y += courseH) {
-    const offset = (row % 2 === 0) ? 0 : 20;
-    for (let x = offset; x <= gameWidth; x += 40) {
+  const stoneWidth = 35;
+  for (let row = 0; row < walkwayHeightLocal / 14; row++) {
+    const offset = (row % 2) * stoneWidth / 2;
+    for (let x = offset; x < gameWidth; x += stoneWidth) {
+      ctx.beginPath();
+      ctx.moveTo(x, wallTop + row * 14);
+      ctx.lineTo(x, wallTop + (row + 1) * 14);
+      ctx.stroke();
+    }
+  }
+
+  // 3. CRENELLATIONS — battlements along top edge
+  const crenWidth = 22;
+  const crenHeight = 14;
+  const crenGap = 12;
+  const crenStep = crenWidth + crenGap;
+  ctx.fillStyle = '#6b5040';
+  for (let x = crenGap / 2; x < gameWidth; x += crenStep) {
+    ctx.fillRect(x, wallTop - crenHeight, crenWidth, crenHeight);
+    // Top highlight
+    ctx.fillStyle = '#8a7058';
+    ctx.fillRect(x, wallTop - crenHeight, crenWidth, 3);
+    ctx.fillStyle = '#6b5040';
+  }
+
+  // 4. WALL FACE — the tall outer wall below walkway
+  const faceTop = wallTop + walkwayHeightLocal;
+  const faceHeight = totalWallHeight * 0.35;
+  ctx.fillStyle = '#7a6040';
+  ctx.fillRect(0, faceTop, gameWidth, faceHeight);
+
+  // Brick texture on wall face
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+  ctx.lineWidth = 0.8;
+  const brickH = 16;
+  const brickW = 45;
+  for (let row = 0; row < faceHeight / brickH; row++) {
+    const y = faceTop + row * brickH;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(gameWidth, y);
+    ctx.stroke();
+    const offset = (row % 2) * brickW / 2;
+    for (let x = offset; x < gameWidth; x += brickW) {
       ctx.beginPath();
       ctx.moveTo(x, y);
-      ctx.lineTo(x, Math.min(y + courseH, wallY + walkwayHeight));
+      ctx.lineTo(x, y + brickH);
       ctx.stroke();
     }
-    row++;
-  }
-  ctx.restore();
-
-  // Crenellations along the top edge — distributed across full width
-  ctx.fillStyle = CONFIG.COLORS.WALL_DARK;
-  const merlonH = 12;
-  const merlonCount = Math.max(1, Math.floor(gameWidth / 34));
-  const stride = gameWidth / merlonCount;
-  const merlonW = stride * 0.74;
-  for (let i = 0; i < merlonCount; i++) {
-    const x = i * stride + (stride - merlonW) / 2;
-    ctx.fillRect(x, wallY - merlonH, merlonW, merlonH);
   }
 
-  // Wall face below the walkway (brick)
-  const cityBaseY = wallY + walkwayHeight;
-  const cityH = wallHeight - walkwayHeight;
-  ctx.fillStyle = CONFIG.COLORS.WALL_BRICK;
-  ctx.fillRect(0, cityBaseY, gameWidth, cityH);
+  // Darker base at bottom of wall face
+  ctx.fillStyle = '#5a4030';
+  ctx.fillRect(0, faceTop + faceHeight - 8, gameWidth, 8);
 
-  ctx.save();
-  ctx.globalAlpha = 0.35;
-  ctx.strokeStyle = CONFIG.COLORS.WALL_DARK;
-  ctx.lineWidth = 0.6;
-  for (let y = cityBaseY + 15; y < wallY + wallHeight; y += 15) {
+  // 5. CITY ZONE — buildings and palm trees behind the wall
+  const cityTop = faceTop + faceHeight;
+  const cityHeight = gameHeight - cityTop;
+
+  // City ground
+  ctx.fillStyle = '#6b5535';
+  ctx.fillRect(0, cityTop, gameWidth, cityHeight);
+
+  // Cobblestone hint
+  ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+  for (let y = cityTop; y < gameHeight; y += 10) {
+    for (let x = 0; x < gameWidth; x += 12) {
+      ctx.strokeRect(x + (Math.floor(y / 10) % 2) * 6, y, 12, 10);
+    }
+  }
+
+  // Buildings — simple rectangles at fixed intervals
+  const buildingColor = ['#8a7558', '#7a6548', '#9a8568', '#6a5538'];
+  const buildingPositions = [];
+  for (let x = 40; x < gameWidth - 40; x += 120 + Math.sin(x) * 30) {
+    buildingPositions.push(x);
+  }
+  buildingPositions.forEach((bx, i) => {
+    const bw = 50 + (i % 3) * 20;
+    const bh = 25 + (i % 4) * 10;
+    ctx.fillStyle = buildingColor[i % buildingColor.length];
+    ctx.fillRect(bx, cityTop + 5, bw, bh);
+    // Door
+    ctx.fillStyle = '#3d2a18';
+    ctx.fillRect(bx + bw / 2 - 4, cityTop + 5 + bh - 12, 8, 12);
+    // Window
+    ctx.fillStyle = '#4a3520';
+    ctx.fillRect(bx + 6, cityTop + 10, 6, 6);
+    ctx.fillRect(bx + bw - 12, cityTop + 10, 6, 6);
+  });
+
+  // Palm trees — green circle canopy + thin trunk
+  const palmPositions = [];
+  for (let x = 80; x < gameWidth - 60; x += 160 + Math.cos(x) * 40) {
+    palmPositions.push(x);
+  }
+  palmPositions.forEach(px => {
+    // Trunk
+    ctx.fillStyle = '#5a4020';
+    ctx.fillRect(px - 2, cityTop + 2, 4, 20);
+    // Canopy
+    ctx.fillStyle = '#3a7a2a';
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(gameWidth, y);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // City strip — buildings & palms peeking from below the walkway
-  if (USE_SPRITE.city && SPRITES.city) {
-    const cityImg = SPRITES.city;
-    const cityTileWidth = Math.max(1, cityImg.width * (cityH / cityImg.height));
-    for (let x = 0; x < gameWidth; x += cityTileWidth) {
-      ctx.drawImage(cityImg, x, cityBaseY, cityTileWidth, cityH);
-    }
-  } else {
-    ctx.fillStyle = '#d6b888';
-    for (const b of decorations.buildings) {
-      ctx.fillRect(b.x, cityBaseY + b.y, b.w, b.h);
-    }
-    ctx.fillStyle = '#5a7a3a';
-    for (const p of decorations.palms) {
-      ctx.beginPath();
-      ctx.arc(p.x, cityBaseY + p.y, p.r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
+    ctx.arc(px, cityTop + 2, 12, 0, Math.PI * 2);
+    ctx.fill();
+    // Darker canopy center
+    ctx.fillStyle = '#2a5a1a';
+    ctx.beginPath();
+    ctx.arc(px, cityTop + 2, 7, 0, Math.PI * 2);
+    ctx.fill();
+  });
 }
 
 // ============ PARTICLE SYSTEM ============
