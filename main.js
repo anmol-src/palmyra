@@ -97,6 +97,10 @@ function resize() {
   generateDecorations();
   initAmbientParticles();
 
+  // Rebuild size-dependent offscreen canvases
+  buildGroundCanvas();
+  buildWallCanvas();
+
   if (state.ballistae.length === 0) {
     initBallistae();
   } else {
@@ -387,70 +391,84 @@ function createLegionarySquad(x, y, speedMultiplier = 1) {
   };
 }
 
+let soldierCache = null;
+const SOLDIER_CACHE_OFFSET = 16; // half-size; soldier origin at canvas center
+
+function buildSoldierCache() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 32;
+  canvas.height = 32;
+  const sctx = canvas.getContext('2d');
+  sctx.translate(SOLDIER_CACHE_OFFSET, SOLDIER_CACHE_OFFSET);
+
+  // Body/torso
+  sctx.fillStyle = '#5a3020';
+  sctx.fillRect(-5, -4, 10, 12);
+
+  // Shield
+  sctx.fillStyle = '#b5452a';
+  roundRect(sctx, -14, -6, 11, 18, 2);
+  sctx.fill();
+  sctx.strokeStyle = '#8a3020';
+  sctx.lineWidth = 1;
+  roundRect(sctx, -14, -6, 11, 18, 2);
+  sctx.stroke();
+  sctx.fillStyle = '#c4a035';
+  sctx.beginPath();
+  sctx.arc(-8.5, 3, 2, 0, Math.PI * 2);
+  sctx.fill();
+  sctx.strokeStyle = '#c4a035';
+  sctx.lineWidth = 0.8;
+  sctx.beginPath();
+  sctx.moveTo(-12, 3);
+  sctx.lineTo(-5, 3);
+  sctx.moveTo(-8.5, -2);
+  sctx.lineTo(-8.5, 8);
+  sctx.stroke();
+
+  // Helmet
+  sctx.fillStyle = '#7a6a4a';
+  sctx.beginPath();
+  sctx.arc(2, -6, 6, 0, Math.PI * 2);
+  sctx.fill();
+  sctx.fillStyle = '#9a8a6a';
+  sctx.beginPath();
+  sctx.arc(2, -7, 4, 0, Math.PI * 2);
+  sctx.fill();
+  sctx.strokeStyle = '#aa2020';
+  sctx.lineWidth = 2.5;
+  sctx.beginPath();
+  sctx.moveTo(-2, -8);
+  sctx.lineTo(6, -8);
+  sctx.stroke();
+
+  // Sword
+  sctx.strokeStyle = '#c0c0c0';
+  sctx.lineWidth = 1.5;
+  sctx.beginPath();
+  sctx.moveTo(8, 0);
+  sctx.lineTo(14, 8);
+  sctx.stroke();
+  sctx.strokeStyle = '#5a3a20';
+  sctx.lineWidth = 2;
+  sctx.beginPath();
+  sctx.moveTo(6, 1);
+  sctx.lineTo(10, -1);
+  sctx.stroke();
+
+  soldierCache = canvas;
+}
+
 function renderSoldierFallback(ctx, x, y, scale) {
+  if (!soldierCache) buildSoldierCache();
+  if (scale === 1) {
+    ctx.drawImage(soldierCache, x - SOLDIER_CACHE_OFFSET, y - SOLDIER_CACHE_OFFSET);
+    return;
+  }
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale, scale);
-
-  // Body/torso — dark rectangle
-  ctx.fillStyle = '#5a3020';
-  ctx.fillRect(-5, -4, 10, 12);
-
-  // Shield (held to the left) — red rounded rect with gold detail
-  ctx.fillStyle = '#b5452a';
-  roundRect(ctx, -14, -6, 11, 18, 2);
-  ctx.fill();
-  ctx.strokeStyle = '#8a3020';
-  ctx.lineWidth = 1;
-  roundRect(ctx, -14, -6, 11, 18, 2);
-  ctx.stroke();
-  // Gold boss (center dot)
-  ctx.fillStyle = '#c4a035';
-  ctx.beginPath();
-  ctx.arc(-8.5, 3, 2, 0, Math.PI * 2);
-  ctx.fill();
-  // Gold wing lines
-  ctx.strokeStyle = '#c4a035';
-  ctx.lineWidth = 0.8;
-  ctx.beginPath();
-  ctx.moveTo(-12, 3);
-  ctx.lineTo(-5, 3);
-  ctx.moveTo(-8.5, -2);
-  ctx.lineTo(-8.5, 8);
-  ctx.stroke();
-
-  // Helmet — circle with crest
-  ctx.fillStyle = '#7a6a4a';
-  ctx.beginPath();
-  ctx.arc(2, -6, 6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#9a8a6a';
-  ctx.beginPath();
-  ctx.arc(2, -7, 4, 0, Math.PI * 2);
-  ctx.fill();
-  // Crest (red line across top)
-  ctx.strokeStyle = '#aa2020';
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(-2, -8);
-  ctx.lineTo(6, -8);
-  ctx.stroke();
-
-  // Sword (right side)
-  ctx.strokeStyle = '#c0c0c0';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(8, 0);
-  ctx.lineTo(14, 8);
-  ctx.stroke();
-  // Sword hilt
-  ctx.strokeStyle = '#5a3a20';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(6, 1);
-  ctx.lineTo(10, -1);
-  ctx.stroke();
-
+  ctx.drawImage(soldierCache, -SOLDIER_CACHE_OFFSET, -SOLDIER_CACHE_OFFSET);
   ctx.restore();
 }
 
@@ -498,20 +516,25 @@ function generateCrack(entity) {
   entity.cracks.push(points);
 }
 
-function renderTestudoFallback(ctx, entity, scale) {
-  const w = entity.width;
-  const h = entity.height;
+let testudoCache = null;
+const TESTUDO_CACHE_PAD = 8;
 
-  ctx.save();
-  ctx.translate(entity.x, entity.y);
-  ctx.scale(scale, scale);
+function buildTestudoCache() {
+  const w = CONFIG.TESTUDO_WIDTH;
+  const h = CONFIG.TESTUDO_HEIGHT;
+  const pad = TESTUDO_CACHE_PAD;
+  const canvas = document.createElement('canvas');
+  canvas.width = w + pad * 2;
+  canvas.height = h + pad * 2 + 7; // extra for feet poking out
+  const tctx = canvas.getContext('2d');
+  // Origin at center of the testudo
+  tctx.translate(pad + w / 2, pad + h / 2);
 
   // Dark border/outline
-  ctx.fillStyle = '#1a0808';
-  roundRect(ctx, -w / 2 - 3, -h / 2 - 3, w + 6, h + 6, 4);
-  ctx.fill();
+  tctx.fillStyle = '#1a0808';
+  roundRect(tctx, -w / 2 - 3, -h / 2 - 3, w + 6, h + 6, 4);
+  tctx.fill();
 
-  // Shield grid: 5 columns × 4 rows
   const cols = 5;
   const rows = 4;
   const shieldW = w / cols;
@@ -522,56 +545,67 @@ function renderTestudoFallback(ctx, entity, scale) {
       const sx = -w / 2 + c * shieldW;
       const sy = -h / 2 + r * shieldH;
 
-      // Shield base — gradient to simulate curve
-      const shieldGrad = ctx.createLinearGradient(sx, sy, sx, sy + shieldH);
+      const shieldGrad = tctx.createLinearGradient(sx, sy, sx, sy + shieldH);
       shieldGrad.addColorStop(0, '#c45535');
       shieldGrad.addColorStop(0.3, '#b5452a');
       shieldGrad.addColorStop(0.7, '#a03520');
       shieldGrad.addColorStop(1, '#8a2518');
-      ctx.fillStyle = shieldGrad;
-      roundRect(ctx, sx + 1, sy + 1, shieldW - 2, shieldH - 2, 2);
-      ctx.fill();
+      tctx.fillStyle = shieldGrad;
+      roundRect(tctx, sx + 1, sy + 1, shieldW - 2, shieldH - 2, 2);
+      tctx.fill();
 
-      // Gold decorations
       const cx = sx + shieldW / 2;
       const cy = sy + shieldH / 2;
 
-      // Central boss
-      ctx.fillStyle = '#c4a035';
-      ctx.beginPath();
-      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
-      ctx.fill();
+      tctx.fillStyle = '#c4a035';
+      tctx.beginPath();
+      tctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+      tctx.fill();
 
-      // Wing lines (curved)
-      ctx.strokeStyle = '#c4a035';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(sx + 4, cy);
-      ctx.quadraticCurveTo(cx - 2, cy - 3, cx - 3, cy);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(sx + shieldW - 4, cy);
-      ctx.quadraticCurveTo(cx + 2, cy - 3, cx + 3, cy);
-      ctx.stroke();
+      tctx.strokeStyle = '#c4a035';
+      tctx.lineWidth = 1;
+      tctx.beginPath();
+      tctx.moveTo(sx + 4, cy);
+      tctx.quadraticCurveTo(cx - 2, cy - 3, cx - 3, cy);
+      tctx.stroke();
+      tctx.beginPath();
+      tctx.moveTo(sx + shieldW - 4, cy);
+      tctx.quadraticCurveTo(cx + 2, cy - 3, cx + 3, cy);
+      tctx.stroke();
 
-      // Vertical line
-      ctx.beginPath();
-      ctx.moveTo(cx, sy + 4);
-      ctx.lineTo(cx, sy + shieldH - 4);
-      ctx.stroke();
+      tctx.beginPath();
+      tctx.moveTo(cx, sy + 4);
+      tctx.lineTo(cx, sy + shieldH - 4);
+      tctx.stroke();
     }
   }
 
   // Feet/swords poking out at the bottom
   for (let c = 0; c < cols; c++) {
     const fx = -w / 2 + c * shieldW + shieldW / 2;
-    ctx.fillStyle = '#5a3a20';
-    ctx.fillRect(fx - 3, h / 2, 6, 5);
-    ctx.fillStyle = '#c0c0c0';
-    ctx.fillRect(fx + 8, h / 2, 2, 7);
+    tctx.fillStyle = '#5a3a20';
+    tctx.fillRect(fx - 3, h / 2, 6, 5);
+    tctx.fillStyle = '#c0c0c0';
+    tctx.fillRect(fx + 8, h / 2, 2, 7);
   }
 
-  // Draw cracks if damaged
+  testudoCache = canvas;
+}
+
+function renderTestudoFallback(ctx, entity, scale) {
+  if (!testudoCache) buildTestudoCache();
+  const w = entity.width;
+  const h = entity.height;
+  const pad = TESTUDO_CACHE_PAD;
+
+  ctx.save();
+  ctx.translate(entity.x, entity.y);
+  ctx.scale(scale, scale);
+
+  // Stamp the cached testudo (origin at canvas center)
+  ctx.drawImage(testudoCache, -w / 2 - pad, -h / 2 - pad);
+
+  // Draw cracks on top (these change per hit, can't cache)
   if (entity.cracks && entity.cracks.length > 0) {
     ctx.strokeStyle = '#0a0a0a';
     ctx.lineWidth = 3;
@@ -616,82 +650,99 @@ function createSiegeTower(x, y, speedMultiplier) {
   };
 }
 
+let siegeTowerCache = null;
+const SIEGE_TOWER_CACHE_PAD = 12; // wheels stick out ~6px each side
+
+function buildSiegeTowerCache() {
+  const w = CONFIG.SIEGE_TOWER_WIDTH;
+  const h = CONFIG.SIEGE_TOWER_HEIGHT;
+  const pad = SIEGE_TOWER_CACHE_PAD;
+  const canvas = document.createElement('canvas');
+  canvas.width = w + pad * 2;
+  canvas.height = h + pad * 2;
+  const stx = canvas.getContext('2d');
+  stx.translate(pad + w / 2, pad + h / 2);
+
+  // Main body
+  const bodyGrad = stx.createLinearGradient(-w / 2, -h / 2, -w / 2, h / 2);
+  bodyGrad.addColorStop(0, '#6b4423');
+  bodyGrad.addColorStop(1, '#4a2a12');
+  stx.fillStyle = bodyGrad;
+  roundRect(stx, -w / 2, -h / 2, w, h, 3);
+  stx.fill();
+
+  stx.strokeStyle = '#2a1408';
+  stx.lineWidth = 2;
+  roundRect(stx, -w / 2, -h / 2, w, h, 3);
+  stx.stroke();
+
+  // Wood plank lines (vertical)
+  stx.strokeStyle = 'rgba(0,0,0,0.15)';
+  stx.lineWidth = 1;
+  for (let x = -w / 2 + 15; x < w / 2; x += 18) {
+    stx.beginPath();
+    stx.moveTo(x, -h / 2 + 3);
+    stx.lineTo(x, h / 2 - 3);
+    stx.stroke();
+  }
+
+  // Cross braces
+  stx.strokeStyle = '#2a1408';
+  stx.lineWidth = 2.5;
+  stx.beginPath();
+  stx.moveTo(-w / 2 + 5, -h / 2 + 5);
+  stx.lineTo(w / 2 - 5, h / 2 - 5);
+  stx.moveTo(w / 2 - 5, -h / 2 + 5);
+  stx.lineTo(-w / 2 + 5, h / 2 - 5);
+  stx.stroke();
+
+  // Top platform (open, showing archers)
+  stx.fillStyle = '#3a1a08';
+  stx.fillRect(-w / 2 + 8, -h / 2 + 5, w - 16, h * 0.25);
+  stx.fillStyle = '#b5452a';
+  for (let i = 0; i < 4; i++) {
+    const ax = -w / 2 + 18 + i * ((w - 36) / 3);
+    stx.beginPath();
+    stx.arc(ax, -h / 2 + 15, 4, 0, Math.PI * 2);
+    stx.fill();
+  }
+
+  // Wheels
+  stx.fillStyle = '#1a0a04';
+  const wheelXs = [-w / 2 - 6, w / 2 + 6];
+  const wheelYs = [-h / 4, h / 4];
+  for (const wx of wheelXs) {
+    for (const wy of wheelYs) {
+      stx.beginPath();
+      stx.arc(wx, wy, 7, 0, Math.PI * 2);
+      stx.fill();
+    }
+  }
+  stx.fillStyle = '#3a2a1a';
+  for (const wx of wheelXs) {
+    for (const wy of wheelYs) {
+      stx.beginPath();
+      stx.arc(wx, wy, 4, 0, Math.PI * 2);
+      stx.fill();
+    }
+  }
+
+  siegeTowerCache = canvas;
+}
+
 function renderSiegeTowerFallback(ctx, entity, scale) {
+  if (!siegeTowerCache) buildSiegeTowerCache();
   const w = entity.width;
   const h = entity.height;
+  const pad = SIEGE_TOWER_CACHE_PAD;
 
   ctx.save();
   ctx.translate(entity.x, entity.y);
   ctx.scale(scale, scale);
 
-  // Main body
-  const bodyGrad = ctx.createLinearGradient(-w / 2, -h / 2, -w / 2, h / 2);
-  bodyGrad.addColorStop(0, '#6b4423');
-  bodyGrad.addColorStop(1, '#4a2a12');
-  ctx.fillStyle = bodyGrad;
-  roundRect(ctx, -w / 2, -h / 2, w, h, 3);
-  ctx.fill();
+  ctx.drawImage(siegeTowerCache, -w / 2 - pad, -h / 2 - pad);
 
-  // Dark border
-  ctx.strokeStyle = '#2a1408';
-  ctx.lineWidth = 2;
-  roundRect(ctx, -w / 2, -h / 2, w, h, 3);
-  ctx.stroke();
-
-  // Wood plank lines (vertical)
-  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-  ctx.lineWidth = 1;
-  for (let x = -w / 2 + 15; x < w / 2; x += 18) {
-    ctx.beginPath();
-    ctx.moveTo(x, -h / 2 + 3);
-    ctx.lineTo(x, h / 2 - 3);
-    ctx.stroke();
-  }
-
-  // Cross braces
-  ctx.strokeStyle = '#2a1408';
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(-w / 2 + 5, -h / 2 + 5);
-  ctx.lineTo(w / 2 - 5, h / 2 - 5);
-  ctx.moveTo(w / 2 - 5, -h / 2 + 5);
-  ctx.lineTo(-w / 2 + 5, h / 2 - 5);
-  ctx.stroke();
-
-  // Top platform (open, showing archers)
-  ctx.fillStyle = '#3a1a08';
-  ctx.fillRect(-w / 2 + 8, -h / 2 + 5, w - 16, h * 0.25);
-  // Archer dots
-  ctx.fillStyle = '#b5452a';
-  for (let i = 0; i < 4; i++) {
-    const ax = -w / 2 + 18 + i * ((w - 36) / 3);
-    ctx.beginPath();
-    ctx.arc(ax, -h / 2 + 15, 4, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Wheels
-  ctx.fillStyle = '#1a0a04';
-  const wheelXs = [-w / 2 - 6, w / 2 + 6];
-  const wheelYs = [-h / 4, h / 4];
-  for (const wx of wheelXs) {
-    for (const wy of wheelYs) {
-      ctx.beginPath();
-      ctx.arc(wx, wy, 7, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  // Wheel highlights
-  ctx.fillStyle = '#3a2a1a';
-  for (const wx of wheelXs) {
-    for (const wy of wheelYs) {
-      ctx.beginPath();
-      ctx.arc(wx, wy, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  // Scorch marks if damaged
+  // Scorch marks if damaged (these change per hit, can't cache)
   if (entity.scorchMarks) {
     for (const s of entity.scorchMarks) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
@@ -773,81 +824,86 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function renderGround(ctx) {
+let groundCanvas = null;
+
+function buildGroundCanvas() {
+  groundCanvas = document.createElement('canvas');
+  groundCanvas.width = gameWidth;
+  groundCanvas.height = wallY;
+  const gctx = groundCanvas.getContext('2d');
+
   // Base gradient — warm sand, slightly darker at bottom
-  const grad = ctx.createLinearGradient(0, 0, 0, wallY);
+  const grad = gctx.createLinearGradient(0, 0, 0, wallY);
   grad.addColorStop(0, '#c8a563');
   grad.addColorStop(0.5, '#b8944e');
   grad.addColorStop(1, '#a8843e');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, gameWidth, wallY);
+  gctx.fillStyle = grad;
+  gctx.fillRect(0, 0, gameWidth, wallY);
 
-  // Subtle noise texture — tiny random-colored dots (drawn once to offscreen canvas, then stamped)
-  if (!renderGround._noiseCanvas) {
-    const nc = document.createElement('canvas');
-    nc.width = 200;
-    nc.height = 200;
-    const nctx = nc.getContext('2d');
-    for (let i = 0; i < 3000; i++) {
-      const x = Math.random() * 200;
-      const y = Math.random() * 200;
-      const brightness = 0.85 + Math.random() * 0.3;
-      nctx.fillStyle = `rgba(${Math.floor(160 * brightness)}, ${Math.floor(130 * brightness)}, ${Math.floor(70 * brightness)}, 0.15)`;
-      nctx.fillRect(x, y, 1 + Math.random(), 1 + Math.random());
-    }
-    renderGround._noiseCanvas = nc;
+  // Noise dots directly on the ground canvas
+  for (let i = 0; i < 8000; i++) {
+    const x = Math.random() * gameWidth;
+    const y = Math.random() * wallY;
+    const b = 0.85 + Math.random() * 0.3;
+    gctx.fillStyle = `rgba(${Math.floor(160 * b)}, ${Math.floor(130 * b)}, ${Math.floor(70 * b)}, 0.12)`;
+    gctx.fillRect(x, y, 1.5, 1.5);
   }
-  const nc = renderGround._noiseCanvas;
-  ctx.globalAlpha = 0.5;
-  for (let x = 0; x < gameWidth; x += 200) {
-    for (let y = 0; y < wallY; y += 200) {
-      ctx.drawImage(nc, x, y);
-    }
-  }
-  ctx.globalAlpha = 1;
 
-  // A few subtle ground features — very faint darker patches at deterministic positions
-  ctx.fillStyle = 'rgba(120, 90, 40, 0.08)';
-  const patchCount = Math.floor(gameWidth / 200);
-  for (let i = 0; i < patchCount * 2; i++) {
-    const px = (i * 317) % gameWidth;
+  // Subtle ground patches
+  gctx.fillStyle = 'rgba(120, 90, 40, 0.06)';
+  const patchCount = Math.floor(gameWidth / 180);
+  for (let i = 0; i < patchCount * 3; i++) {
+    const px = ((i * 317) % gameWidth);
     const py = ((i * 541) % (wallY - 100)) + 50;
-    ctx.beginPath();
-    ctx.ellipse(px, py, 40 + (i % 3) * 20, 15 + (i % 2) * 10, 0, 0, Math.PI * 2);
-    ctx.fill();
+    gctx.beginPath();
+    gctx.ellipse(px, py, 30 + (i % 3) * 15, 12 + (i % 2) * 8, 0, 0, Math.PI * 2);
+    gctx.fill();
   }
 }
 
-function renderWall(ctx) {
-  const wallTop = wallY;
+function renderGround(ctx) {
+  if (!groundCanvas) buildGroundCanvas();
+  ctx.drawImage(groundCanvas, 0, 0);
+}
+
+let wallCanvas = null;
+
+function buildWallCanvas() {
   const totalWallHeight = gameHeight - wallY;
+  // Add 14px above 0 for crenellations that extend above wallY
+  const padTop = 14;
+  wallCanvas = document.createElement('canvas');
+  wallCanvas.width = gameWidth;
+  wallCanvas.height = totalWallHeight + padTop;
+  const wctx = wallCanvas.getContext('2d');
+  wctx.translate(0, padTop);
 
   // 1. SOLID FILL — covers everything, kills any possible white gaps
-  ctx.fillStyle = '#3d2414';
-  ctx.fillRect(0, wallTop, gameWidth, totalWallHeight);
+  wctx.fillStyle = '#3d2414';
+  wctx.fillRect(0, 0, gameWidth, totalWallHeight);
 
   // 2. WALKWAY — the top section where ballistae sit
   const walkwayHeightLocal = totalWallHeight * 0.2;
-  ctx.fillStyle = '#8a7560';
-  ctx.fillRect(0, wallTop, gameWidth, walkwayHeightLocal);
+  wctx.fillStyle = '#8a7560';
+  wctx.fillRect(0, 0, gameWidth, walkwayHeightLocal);
 
   // Stone block texture on walkway
-  ctx.strokeStyle = 'rgba(0,0,0,0.1)';
-  ctx.lineWidth = 0.5;
-  for (let y = wallTop; y < wallTop + walkwayHeightLocal; y += 14) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(gameWidth, y);
-    ctx.stroke();
+  wctx.strokeStyle = 'rgba(0,0,0,0.1)';
+  wctx.lineWidth = 0.5;
+  for (let y = 0; y < walkwayHeightLocal; y += 14) {
+    wctx.beginPath();
+    wctx.moveTo(0, y);
+    wctx.lineTo(gameWidth, y);
+    wctx.stroke();
   }
   const stoneWidth = 35;
   for (let row = 0; row < walkwayHeightLocal / 14; row++) {
     const offset = (row % 2) * stoneWidth / 2;
     for (let x = offset; x < gameWidth; x += stoneWidth) {
-      ctx.beginPath();
-      ctx.moveTo(x, wallTop + row * 14);
-      ctx.lineTo(x, wallTop + (row + 1) * 14);
-      ctx.stroke();
+      wctx.beginPath();
+      wctx.moveTo(x, row * 14);
+      wctx.lineTo(x, (row + 1) * 14);
+      wctx.stroke();
     }
   }
 
@@ -856,62 +912,60 @@ function renderWall(ctx) {
   const crenHeight = 14;
   const crenGap = 12;
   const crenStep = crenWidth + crenGap;
-  ctx.fillStyle = '#6b5040';
+  wctx.fillStyle = '#6b5040';
   for (let x = crenGap / 2; x < gameWidth; x += crenStep) {
-    ctx.fillRect(x, wallTop - crenHeight, crenWidth, crenHeight);
-    // Top highlight
-    ctx.fillStyle = '#8a7058';
-    ctx.fillRect(x, wallTop - crenHeight, crenWidth, 3);
-    ctx.fillStyle = '#6b5040';
+    wctx.fillRect(x, -crenHeight, crenWidth, crenHeight);
+    wctx.fillStyle = '#8a7058';
+    wctx.fillRect(x, -crenHeight, crenWidth, 3);
+    wctx.fillStyle = '#6b5040';
   }
 
-  // 4. WALL FACE — the tall outer wall below walkway
-  const faceTop = wallTop + walkwayHeightLocal;
+  // 4. WALL FACE
+  const faceTop = walkwayHeightLocal;
   const faceHeight = totalWallHeight * 0.35;
-  ctx.fillStyle = '#7a6040';
-  ctx.fillRect(0, faceTop, gameWidth, faceHeight);
+  wctx.fillStyle = '#7a6040';
+  wctx.fillRect(0, faceTop, gameWidth, faceHeight);
 
   // Brick texture on wall face
-  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
-  ctx.lineWidth = 0.8;
+  wctx.strokeStyle = 'rgba(0,0,0,0.12)';
+  wctx.lineWidth = 0.8;
   const brickH = 16;
   const brickW = 45;
   for (let row = 0; row < faceHeight / brickH; row++) {
     const y = faceTop + row * brickH;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(gameWidth, y);
-    ctx.stroke();
+    wctx.beginPath();
+    wctx.moveTo(0, y);
+    wctx.lineTo(gameWidth, y);
+    wctx.stroke();
     const offset = (row % 2) * brickW / 2;
     for (let x = offset; x < gameWidth; x += brickW) {
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x, y + brickH);
-      ctx.stroke();
+      wctx.beginPath();
+      wctx.moveTo(x, y);
+      wctx.lineTo(x, y + brickH);
+      wctx.stroke();
     }
   }
 
   // Darker base at bottom of wall face
-  ctx.fillStyle = '#5a4030';
-  ctx.fillRect(0, faceTop + faceHeight - 8, gameWidth, 8);
+  wctx.fillStyle = '#5a4030';
+  wctx.fillRect(0, faceTop + faceHeight - 8, gameWidth, 8);
 
-  // 5. CITY ZONE — buildings and palm trees behind the wall
+  // 5. CITY ZONE
   const cityTop = faceTop + faceHeight;
-  const cityHeight = gameHeight - cityTop;
+  const cityHeight = totalWallHeight - cityTop;
 
-  // City ground
-  ctx.fillStyle = '#6b5535';
-  ctx.fillRect(0, cityTop, gameWidth, cityHeight);
+  wctx.fillStyle = '#6b5535';
+  wctx.fillRect(0, cityTop, gameWidth, cityHeight);
 
   // Cobblestone hint
-  ctx.strokeStyle = 'rgba(0,0,0,0.06)';
-  for (let y = cityTop; y < gameHeight; y += 10) {
+  wctx.strokeStyle = 'rgba(0,0,0,0.06)';
+  for (let y = cityTop; y < totalWallHeight; y += 10) {
     for (let x = 0; x < gameWidth; x += 12) {
-      ctx.strokeRect(x + (Math.floor(y / 10) % 2) * 6, y, 12, 10);
+      wctx.strokeRect(x + (Math.floor(y / 10) % 2) * 6, y, 12, 10);
     }
   }
 
-  // Buildings — simple rectangles at fixed intervals
+  // Buildings
   const buildingColor = ['#8a7558', '#7a6548', '#9a8568', '#6a5538'];
   const buildingPositions = [];
   for (let x = 40; x < gameWidth - 40; x += 120 + Math.sin(x) * 30) {
@@ -920,37 +974,38 @@ function renderWall(ctx) {
   buildingPositions.forEach((bx, i) => {
     const bw = 50 + (i % 3) * 20;
     const bh = 25 + (i % 4) * 10;
-    ctx.fillStyle = buildingColor[i % buildingColor.length];
-    ctx.fillRect(bx, cityTop + 5, bw, bh);
-    // Door
-    ctx.fillStyle = '#3d2a18';
-    ctx.fillRect(bx + bw / 2 - 4, cityTop + 5 + bh - 12, 8, 12);
-    // Window
-    ctx.fillStyle = '#4a3520';
-    ctx.fillRect(bx + 6, cityTop + 10, 6, 6);
-    ctx.fillRect(bx + bw - 12, cityTop + 10, 6, 6);
+    wctx.fillStyle = buildingColor[i % buildingColor.length];
+    wctx.fillRect(bx, cityTop + 5, bw, bh);
+    wctx.fillStyle = '#3d2a18';
+    wctx.fillRect(bx + bw / 2 - 4, cityTop + 5 + bh - 12, 8, 12);
+    wctx.fillStyle = '#4a3520';
+    wctx.fillRect(bx + 6, cityTop + 10, 6, 6);
+    wctx.fillRect(bx + bw - 12, cityTop + 10, 6, 6);
   });
 
-  // Palm trees — green circle canopy + thin trunk
+  // Palm trees
   const palmPositions = [];
   for (let x = 80; x < gameWidth - 60; x += 160 + Math.cos(x) * 40) {
     palmPositions.push(x);
   }
   palmPositions.forEach(px => {
-    // Trunk
-    ctx.fillStyle = '#5a4020';
-    ctx.fillRect(px - 2, cityTop + 2, 4, 20);
-    // Canopy
-    ctx.fillStyle = '#3a7a2a';
-    ctx.beginPath();
-    ctx.arc(px, cityTop + 2, 12, 0, Math.PI * 2);
-    ctx.fill();
-    // Darker canopy center
-    ctx.fillStyle = '#2a5a1a';
-    ctx.beginPath();
-    ctx.arc(px, cityTop + 2, 7, 0, Math.PI * 2);
-    ctx.fill();
+    wctx.fillStyle = '#5a4020';
+    wctx.fillRect(px - 2, cityTop + 2, 4, 20);
+    wctx.fillStyle = '#3a7a2a';
+    wctx.beginPath();
+    wctx.arc(px, cityTop + 2, 12, 0, Math.PI * 2);
+    wctx.fill();
+    wctx.fillStyle = '#2a5a1a';
+    wctx.beginPath();
+    wctx.arc(px, cityTop + 2, 7, 0, Math.PI * 2);
+    wctx.fill();
   });
+}
+
+function renderWall(ctx) {
+  if (!wallCanvas) buildWallCanvas();
+  // Wall canvas was built with 14px top padding for crenellations
+  ctx.drawImage(wallCanvas, 0, wallY - 14);
 }
 
 // ============ PARTICLE SYSTEM ============
@@ -3023,6 +3078,12 @@ function init() {
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
   try { state.bestScore = parseInt(localStorage.getItem('palmyra_best') || '0'); } catch(e) {}
+
+  // Build entity sprite caches once (fixed size, don't depend on viewport)
+  buildTestudoCache();
+  buildSoldierCache();
+  buildSiegeTowerCache();
+
   initAssets();
   requestAnimationFrame(gameLoop);
 }
