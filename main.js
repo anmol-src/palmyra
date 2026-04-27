@@ -832,28 +832,35 @@ function renderGround(ctx) {
 
 function renderWall(ctx) {
   if (USE_SPRITE.wall && SPRITES.wall) {
-    // Fill the entire wall+city band with brick color first to hide any
-    // transparent gaps in the PNGs.
-    ctx.fillStyle = '#6b4423';
-    ctx.fillRect(0, wallY, gameWidth, wallHeight);
+    // Solid fill behind the entire wall/city zone — kills any white strip
+    // showing through transparent gaps in the PNGs (extend a few px above
+    // wallY to cover the seam with the battlefield).
+    ctx.fillStyle = '#5a3820';
+    ctx.fillRect(0, wallY - 5, gameWidth, gameHeight - wallY + 5);
 
-    // Tile the wall image — the walkway portion sits at top
-    const wallImg = SPRITES.wall;
-    const wallRenderHeight = walkwayHeight;
-    const wallTileWidth = Math.max(1, wallImg.width * (wallRenderHeight / wallImg.height));
-    for (let x = 0; x < gameWidth; x += wallTileWidth) {
-      ctx.drawImage(wallImg, x, wallY, wallTileWidth, wallRenderHeight);
+    // Stretch the wall PNG to full width for the battlements + walkway only.
+    const wallImgHeight = gameHeight * 0.08;
+    ctx.drawImage(SPRITES.wall, 0, wallY, gameWidth, wallImgHeight);
+
+    // Code-drawn brick face directly below the PNG section.
+    const brickH = gameHeight * 0.05;
+    const brickY = wallY + wallImgHeight;
+    ctx.fillStyle = '#6b4423';
+    ctx.fillRect(0, brickY, gameWidth, brickH);
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    ctx.lineWidth = 1;
+    for (let by = brickY; by < brickY + brickH; by += 12) {
+      ctx.beginPath();
+      ctx.moveTo(0, by);
+      ctx.lineTo(gameWidth, by);
+      ctx.stroke();
     }
 
-    // Tile the city strip directly below (no gap)
+    // City strip below, stretched full width to fill remaining bottom area.
     if (USE_SPRITE.city && SPRITES.city) {
-      const cityImg = SPRITES.city;
-      const cityY = wallY + walkwayHeight;
-      const cityRenderHeight = wallHeight - walkwayHeight;
-      const cityTileWidth = Math.max(1, cityImg.width * (cityRenderHeight / cityImg.height));
-      for (let x = 0; x < gameWidth; x += cityTileWidth) {
-        ctx.drawImage(cityImg, x, cityY, cityTileWidth, cityRenderHeight);
-      }
+      const cityY = brickY + brickH;
+      const cityH = gameHeight - cityY;
+      ctx.drawImage(SPRITES.city, 0, cityY, gameWidth, cityH);
     }
     return;
   }
@@ -2256,41 +2263,73 @@ function updateBallistae(dt) {
 
 function renderBallista(ctx, b) {
   ctx.save();
-  if (b.recoilTimer > 0) {
-    ctx.translate(b.x, b.y);
-    ctx.scale(0.85, 0.85);
-    ctx.translate(-b.x, -b.y);
-  }
-  // Recoil shrinks the V-arms inward
-  const armSpread = b.recoilTimer > 0 ? 6 : 12;
-  const armHeight = b.recoilTimer > 0 ? 8 : 12;
-
-  // Dark wood base — 24×14
-  ctx.fillStyle = '#3d2414';
-  ctx.fillRect(b.x - 12, b.y - 7, 24, 14);
-
-  // Subtle wood grain highlight on top edge
-  ctx.fillStyle = '#5a3520';
-  ctx.fillRect(b.x - 12, b.y - 7, 24, 2);
-
-  // V-shaped bow arms above the base, 12px each
-  ctx.strokeStyle = '#3d2414';
-  ctx.lineWidth = 2.5;
   ctx.lineCap = 'round';
+
+  // Recoil: arms shorten and pull inward for ~150ms
+  const recoiling = b.recoilTimer > 0;
+  const armLen = recoiling ? 9 : 14;
+  const armSpread = recoiling ? 9 : 14;
+
+  // Wooden base — rounded rect 28×12, warm dark brown
+  const baseX = b.x - 14;
+  const baseY = b.y - 6;
+  const baseW = 28;
+  const baseH = 12;
+  ctx.fillStyle = '#5a3418';
   ctx.beginPath();
-  ctx.moveTo(b.x, b.y - 7);
-  ctx.lineTo(b.x - armSpread, b.y - 7 - armHeight);
-  ctx.moveTo(b.x, b.y - 7);
-  ctx.lineTo(b.x + armSpread, b.y - 7 - armHeight);
+  if (ctx.roundRect) {
+    ctx.roundRect(baseX, baseY, baseW, baseH, 3);
+  } else {
+    ctx.rect(baseX, baseY, baseW, baseH);
+  }
+  ctx.fill();
+
+  // Wood grain highlight along the top edge
+  ctx.fillStyle = 'rgba(140, 90, 50, 0.5)';
+  ctx.fillRect(baseX + 2, baseY + 1, baseW - 4, 1.5);
+
+  // Two bow arms — curved from base up-and-out to the tips
+  const pivotY = baseY;
+  const tipLeftX = b.x - armSpread;
+  const tipLeftY = pivotY - armLen;
+  const tipRightX = b.x + armSpread;
+  const tipRightY = pivotY - armLen;
+
+  ctx.strokeStyle = '#3d2010';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  // Left arm: quadratic curve gives a subtle bow shape
+  ctx.moveTo(b.x - 3, pivotY);
+  ctx.quadraticCurveTo(b.x - armSpread * 0.6, pivotY - armLen * 0.4, tipLeftX, tipLeftY);
+  // Right arm
+  ctx.moveTo(b.x + 3, pivotY);
+  ctx.quadraticCurveTo(b.x + armSpread * 0.6, pivotY - armLen * 0.4, tipRightX, tipRightY);
   ctx.stroke();
 
-  // Bowstring across the top of the arms
-  ctx.strokeStyle = '#d4c4a8';
+  // Bowstring between the two tips
+  ctx.strokeStyle = '#8a6a3a';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(b.x - armSpread, b.y - 7 - armHeight);
-  ctx.lineTo(b.x + armSpread, b.y - 7 - armHeight);
+  ctx.moveTo(tipLeftX, tipLeftY);
+  ctx.lineTo(tipRightX, tipRightY);
   ctx.stroke();
+
+  // Loaded bolt — gold line pointing up from center (hidden during recoil)
+  if (!recoiling) {
+    ctx.strokeStyle = '#c4a035';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(b.x, pivotY - 2);
+    ctx.lineTo(b.x, pivotY - 10);
+    ctx.stroke();
+  }
+
+  // Metal fittings — small dark dots at the arm joints
+  ctx.fillStyle = '#1a0e05';
+  ctx.beginPath();
+  ctx.arc(b.x - 3, pivotY, 1.3, 0, Math.PI * 2);
+  ctx.arc(b.x + 3, pivotY, 1.3, 0, Math.PI * 2);
+  ctx.fill();
 
   ctx.restore();
 }
