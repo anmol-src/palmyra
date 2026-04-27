@@ -157,14 +157,16 @@ const SPRITE_FILES = {
   mosaic_tile: 'assets/sprites/mosaic_tile.png',
 };
 
-// PNGs with white/checkered backgrounds: force the cleaner code-drawn fallback
+// All visuals are code-drawn — never render PNG sprites
 const USE_SPRITE = {
-  legionary: true,
-  testudo: true,
+  legionary: false,
+  testudo: false,
   siegeTower: false,
   wall: false,
   city: false,
-  mosaic_tile: true,
+  mosaic_tile: false,
+  defender: false,
+  borderFrame: false,
 };
 
 function loadImage(src) {
@@ -385,102 +387,86 @@ function createLegionarySquad(x, y, speedMultiplier = 1) {
   };
 }
 
+function renderSoldierFallback(ctx, x, y, scale) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+
+  // Body/torso — dark rectangle
+  ctx.fillStyle = '#5a3020';
+  ctx.fillRect(-5, -4, 10, 12);
+
+  // Shield (held to the left) — red rounded rect with gold detail
+  ctx.fillStyle = '#b5452a';
+  roundRect(ctx, -14, -6, 11, 18, 2);
+  ctx.fill();
+  ctx.strokeStyle = '#8a3020';
+  ctx.lineWidth = 1;
+  roundRect(ctx, -14, -6, 11, 18, 2);
+  ctx.stroke();
+  // Gold boss (center dot)
+  ctx.fillStyle = '#c4a035';
+  ctx.beginPath();
+  ctx.arc(-8.5, 3, 2, 0, Math.PI * 2);
+  ctx.fill();
+  // Gold wing lines
+  ctx.strokeStyle = '#c4a035';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(-12, 3);
+  ctx.lineTo(-5, 3);
+  ctx.moveTo(-8.5, -2);
+  ctx.lineTo(-8.5, 8);
+  ctx.stroke();
+
+  // Helmet — circle with crest
+  ctx.fillStyle = '#7a6a4a';
+  ctx.beginPath();
+  ctx.arc(2, -6, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#9a8a6a';
+  ctx.beginPath();
+  ctx.arc(2, -7, 4, 0, Math.PI * 2);
+  ctx.fill();
+  // Crest (red line across top)
+  ctx.strokeStyle = '#aa2020';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(-2, -8);
+  ctx.lineTo(6, -8);
+  ctx.stroke();
+
+  // Sword (right side)
+  ctx.strokeStyle = '#c0c0c0';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(8, 0);
+  ctx.lineTo(14, 8);
+  ctx.stroke();
+  // Sword hilt
+  ctx.strokeStyle = '#5a3a20';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(6, 1);
+  ctx.lineTo(10, -1);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 function renderLegionarySquad(ctx, entity) {
   const scale = entityScale(entity);
   const flashing = entity.flashTimer > 0;
 
-  if (USE_SPRITE.legionary && SPRITES.legionary) {
-    const w = entity.width * scale;
-    const h = entity.height * scale;
-    const bob = Math.sin(state.time / 1000 * 6) * 2;
-    ctx.save();
-    if (flashing) ctx.filter = 'brightness(1.8)';
-    ctx.drawImage(SPRITES.legionary, entity.x - w / 2, entity.y - h / 2 + bob, w, h);
-    ctx.restore();
-    return;
-  }
-
+  ctx.save();
+  if (flashing) ctx.filter = 'brightness(1.8)';
   for (const s of entity.soldiers) {
+    const bob = Math.sin(state.time / 1000 * 6 + s.bobPhase) * 2;
     const sx = entity.x + s.offsetX;
-    const sy = entity.y + s.offsetY + (s.renderOffsetY || 0);
-
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.scale(scale, scale);
-
-    // Soft shadow under the soldier
-    ctx.fillStyle = CONFIG.COLORS.SHADOW;
-    ctx.beginPath();
-    ctx.ellipse(0, 14, 12, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Body torso hint behind the shield (dark armor)
-    ctx.fillStyle = flashing ? '#ffd0c0' : '#2a1a0a';
-    ctx.fillRect(-3, 1, 6, 8);
-
-    // Helmet — outer dark circle 8px
-    ctx.fillStyle = flashing ? '#ffffff' : '#2a1a0a';
-    ctx.beginPath();
-    ctx.arc(0, 0, 8, 0, Math.PI * 2);
-    ctx.fill();
-    // Inner lighter highlight 5px
-    ctx.fillStyle = flashing ? '#ffe6a8' : '#6b5030';
-    ctx.beginPath();
-    ctx.arc(-1.5, -2, 5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Red crest line across helmet top, 10px wide
-    ctx.strokeStyle = CONFIG.COLORS.CREST_RED;
-    ctx.lineWidth = 2.2;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(-5, -7);
-    ctx.lineTo(5, -7);
-    ctx.stroke();
-
-    // Shield — red rounded rect 10×16 with gold trim + boss
-    ctx.fillStyle = flashing ? '#ffb0a0' : CONFIG.COLORS.SHIELD_RED;
-    const shieldX = 5, shieldY = -4, shieldW = 10, shieldH = 16, shieldR = 2;
-    ctx.beginPath();
-    ctx.moveTo(shieldX + shieldR, shieldY);
-    ctx.lineTo(shieldX + shieldW - shieldR, shieldY);
-    ctx.quadraticCurveTo(shieldX + shieldW, shieldY, shieldX + shieldW, shieldY + shieldR);
-    ctx.lineTo(shieldX + shieldW, shieldY + shieldH - shieldR);
-    ctx.quadraticCurveTo(shieldX + shieldW, shieldY + shieldH, shieldX + shieldW - shieldR, shieldY + shieldH);
-    ctx.lineTo(shieldX + shieldR, shieldY + shieldH);
-    ctx.quadraticCurveTo(shieldX, shieldY + shieldH, shieldX, shieldY + shieldH - shieldR);
-    ctx.lineTo(shieldX, shieldY + shieldR);
-    ctx.quadraticCurveTo(shieldX, shieldY, shieldX + shieldR, shieldY);
-    ctx.closePath();
-    ctx.fill();
-    // Gold border
-    ctx.strokeStyle = CONFIG.COLORS.GOLD;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    // Gold dot center, 2px
-    ctx.fillStyle = CONFIG.COLORS.GOLD;
-    ctx.beginPath();
-    ctx.arc(shieldX + shieldW / 2, shieldY + shieldH / 2, 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Sword — 12px silver line with crossguard
-    ctx.strokeStyle = '#c0c0c0';
-    ctx.lineWidth = 1.6;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(-6, 0);
-    ctx.lineTo(-14, 8);
-    ctx.stroke();
-    // Crossguard 4px, brown
-    ctx.strokeStyle = '#5a3018';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-7.5, -1.5);
-    ctx.lineTo(-4.5, 1.5);
-    ctx.stroke();
-
-    ctx.restore();
+    const sy = entity.y + s.offsetY + (s.renderOffsetY || 0) + bob;
+    renderSoldierFallback(ctx, sx, sy, scale);
   }
+  ctx.restore();
 }
 
 function createTestudo(x, y, speedMultiplier) {
@@ -512,120 +498,103 @@ function generateCrack(entity) {
   entity.cracks.push(points);
 }
 
-function renderTestudo(ctx, entity) {
-  const scale = entityScale(entity);
-  const flashing = entity.flashTimer > 0;
-  const w = entity.width * scale;
-  const h = entity.height * scale;
-  const x0 = entity.x - w / 2;
-  const y0 = entity.y - h / 2;
+function renderTestudoFallback(ctx, entity, scale) {
+  const w = entity.width;
+  const h = entity.height;
 
-  if (USE_SPRITE.testudo && SPRITES.testudo) {
-    ctx.save();
-    if (flashing) ctx.filter = 'brightness(1.8)';
-    ctx.drawImage(SPRITES.testudo, x0, y0, w, h);
-    ctx.restore();
-    if (entity.cracks.length > 0) {
-      ctx.save();
-      ctx.translate(x0, y0);
-      ctx.scale(scale, scale);
-      ctx.strokeStyle = '#0a0a0a';
-      ctx.lineWidth = 3;
-      for (const crack of entity.cracks) {
-        ctx.beginPath();
-        for (let i = 0; i < crack.length; i++) {
-          const p = crack[i];
-          if (i === 0) ctx.moveTo(p.x, p.y);
-          else ctx.lineTo(p.x, p.y);
-        }
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    return;
-  }
-
-  // Main red shield body — slightly brighter so gold pops
-  ctx.fillStyle = flashing ? '#ffb0a0' : '#a83030';
-  ctx.fillRect(x0, y0, w, h);
-
-  // Dark outer border, 3px
-  ctx.strokeStyle = '#1a0606';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(x0, y0, w, h);
-
-  // Grid 3 rows × 5 columns
   ctx.save();
-  ctx.translate(x0, y0);
+  ctx.translate(entity.x, entity.y);
   ctx.scale(scale, scale);
-  const innerW = entity.width;
-  const innerH = entity.height;
-  const cols = 5, rows = 3;
-  const cellW = innerW / cols;
-  const cellH = innerH / rows;
 
-  // Dark red separators (2px)
-  ctx.strokeStyle = '#600000';
-  ctx.lineWidth = 2;
-  for (let c = 1; c < cols; c++) {
-    ctx.beginPath();
-    ctx.moveTo(c * cellW, 0);
-    ctx.lineTo(c * cellW, innerH);
-    ctx.stroke();
-  }
-  for (let r = 1; r < rows; r++) {
-    ctx.beginPath();
-    ctx.moveTo(0, r * cellH);
-    ctx.lineTo(innerW, r * cellH);
-    ctx.stroke();
-  }
+  // Dark border/outline
+  ctx.fillStyle = '#1a0808';
+  roundRect(ctx, -w / 2 - 3, -h / 2 - 3, w + 6, h + 6, 4);
+  ctx.fill();
 
-  // Gold decorations: curved wings + vertical line + center dot
-  ctx.strokeStyle = CONFIG.COLORS.GOLD;
-  ctx.fillStyle = CONFIG.COLORS.GOLD;
-  ctx.lineWidth = 1.2;
+  // Shield grid: 5 columns × 4 rows
+  const cols = 5;
+  const rows = 4;
+  const shieldW = w / cols;
+  const shieldH = h / rows;
+
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const cx = c * cellW + cellW / 2;
-      const cy = r * cellH + cellH / 2;
-      const wingW = cellW * 0.32;
-      const wingH = cellH * 0.18;
-      // Left wing — curved
-      ctx.beginPath();
-      ctx.moveTo(cx - wingW, cy + wingH * 0.4);
-      ctx.quadraticCurveTo(cx - wingW * 0.6, cy - wingH, cx, cy);
-      ctx.stroke();
-      // Right wing — curved
-      ctx.beginPath();
-      ctx.moveTo(cx + wingW, cy + wingH * 0.4);
-      ctx.quadraticCurveTo(cx + wingW * 0.6, cy - wingH, cx, cy);
-      ctx.stroke();
-      // Vertical line down the middle
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - cellH * 0.25);
-      ctx.lineTo(cx, cy + cellH * 0.32);
-      ctx.stroke();
-      // Center dot, 3px
-      ctx.beginPath();
-      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      const sx = -w / 2 + c * shieldW;
+      const sy = -h / 2 + r * shieldH;
+
+      // Shield base — gradient to simulate curve
+      const shieldGrad = ctx.createLinearGradient(sx, sy, sx, sy + shieldH);
+      shieldGrad.addColorStop(0, '#c45535');
+      shieldGrad.addColorStop(0.3, '#b5452a');
+      shieldGrad.addColorStop(0.7, '#a03520');
+      shieldGrad.addColorStop(1, '#8a2518');
+      ctx.fillStyle = shieldGrad;
+      roundRect(ctx, sx + 1, sy + 1, shieldW - 2, shieldH - 2, 2);
       ctx.fill();
+
+      // Gold decorations
+      const cx = sx + shieldW / 2;
+      const cy = sy + shieldH / 2;
+
+      // Central boss
+      ctx.fillStyle = '#c4a035';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Wing lines (curved)
+      ctx.strokeStyle = '#c4a035';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sx + 4, cy);
+      ctx.quadraticCurveTo(cx - 2, cy - 3, cx - 3, cy);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(sx + shieldW - 4, cy);
+      ctx.quadraticCurveTo(cx + 2, cy - 3, cx + 3, cy);
+      ctx.stroke();
+
+      // Vertical line
+      ctx.beginPath();
+      ctx.moveTo(cx, sy + 4);
+      ctx.lineTo(cx, sy + shieldH - 4);
+      ctx.stroke();
     }
   }
 
-  // Cracks
-  if (entity.cracks.length > 0) {
+  // Feet/swords poking out at the bottom
+  for (let c = 0; c < cols; c++) {
+    const fx = -w / 2 + c * shieldW + shieldW / 2;
+    ctx.fillStyle = '#5a3a20';
+    ctx.fillRect(fx - 3, h / 2, 6, 5);
+    ctx.fillStyle = '#c0c0c0';
+    ctx.fillRect(fx + 8, h / 2, 2, 7);
+  }
+
+  // Draw cracks if damaged
+  if (entity.cracks && entity.cracks.length > 0) {
     ctx.strokeStyle = '#0a0a0a';
     ctx.lineWidth = 3;
     for (const crack of entity.cracks) {
       ctx.beginPath();
-      for (let i = 0; i < crack.length; i++) {
-        const p = crack[i];
-        if (i === 0) ctx.moveTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
-      }
+      crack.forEach((pt, i) => {
+        if (i === 0) ctx.moveTo(pt.x - w / 2, pt.y - h / 2);
+        else ctx.lineTo(pt.x - w / 2, pt.y - h / 2);
+      });
       ctx.stroke();
     }
   }
+
+  ctx.restore();
+}
+
+function renderTestudo(ctx, entity) {
+  const scale = entityScale(entity);
+  const flashing = entity.flashTimer > 0;
+
+  ctx.save();
+  if (flashing) ctx.filter = 'brightness(1.8)';
+  renderTestudoFallback(ctx, entity, scale);
   ctx.restore();
 }
 
@@ -647,87 +616,104 @@ function createSiegeTower(x, y, speedMultiplier) {
   };
 }
 
+function renderSiegeTowerFallback(ctx, entity, scale) {
+  const w = entity.width;
+  const h = entity.height;
+
+  ctx.save();
+  ctx.translate(entity.x, entity.y);
+  ctx.scale(scale, scale);
+
+  // Main body
+  const bodyGrad = ctx.createLinearGradient(-w / 2, -h / 2, -w / 2, h / 2);
+  bodyGrad.addColorStop(0, '#6b4423');
+  bodyGrad.addColorStop(1, '#4a2a12');
+  ctx.fillStyle = bodyGrad;
+  roundRect(ctx, -w / 2, -h / 2, w, h, 3);
+  ctx.fill();
+
+  // Dark border
+  ctx.strokeStyle = '#2a1408';
+  ctx.lineWidth = 2;
+  roundRect(ctx, -w / 2, -h / 2, w, h, 3);
+  ctx.stroke();
+
+  // Wood plank lines (vertical)
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+  ctx.lineWidth = 1;
+  for (let x = -w / 2 + 15; x < w / 2; x += 18) {
+    ctx.beginPath();
+    ctx.moveTo(x, -h / 2 + 3);
+    ctx.lineTo(x, h / 2 - 3);
+    ctx.stroke();
+  }
+
+  // Cross braces
+  ctx.strokeStyle = '#2a1408';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(-w / 2 + 5, -h / 2 + 5);
+  ctx.lineTo(w / 2 - 5, h / 2 - 5);
+  ctx.moveTo(w / 2 - 5, -h / 2 + 5);
+  ctx.lineTo(-w / 2 + 5, h / 2 - 5);
+  ctx.stroke();
+
+  // Top platform (open, showing archers)
+  ctx.fillStyle = '#3a1a08';
+  ctx.fillRect(-w / 2 + 8, -h / 2 + 5, w - 16, h * 0.25);
+  // Archer dots
+  ctx.fillStyle = '#b5452a';
+  for (let i = 0; i < 4; i++) {
+    const ax = -w / 2 + 18 + i * ((w - 36) / 3);
+    ctx.beginPath();
+    ctx.arc(ax, -h / 2 + 15, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Wheels
+  ctx.fillStyle = '#1a0a04';
+  const wheelXs = [-w / 2 - 6, w / 2 + 6];
+  const wheelYs = [-h / 4, h / 4];
+  for (const wx of wheelXs) {
+    for (const wy of wheelYs) {
+      ctx.beginPath();
+      ctx.arc(wx, wy, 7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  // Wheel highlights
+  ctx.fillStyle = '#3a2a1a';
+  for (const wx of wheelXs) {
+    for (const wy of wheelYs) {
+      ctx.beginPath();
+      ctx.arc(wx, wy, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Scorch marks if damaged
+  if (entity.scorchMarks) {
+    for (const s of entity.scorchMarks) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      ctx.beginPath();
+      ctx.ellipse(s.x - w / 2, s.y - h / 2, s.r, s.r * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
 function renderSiegeTower(ctx, entity) {
   const scale = entityScale(entity);
   const flashing = entity.flashTimer > 0;
-  const w = entity.width * scale;
   const h = entity.height * scale;
-  const x0 = entity.x - w / 2;
   const y0 = entity.y - h / 2;
 
-  if (USE_SPRITE.siegeTower && SPRITES.siegeTower) {
-    ctx.save();
-    if (flashing) ctx.filter = 'brightness(1.8)';
-    ctx.drawImage(SPRITES.siegeTower, x0, y0, w, h);
-    ctx.restore();
-  } else {
-    // Main brown body
-    ctx.fillStyle = flashing ? '#d8b078' : '#5a3018';
-    ctx.fillRect(x0, y0, w, h);
-    // Outer dark border, 3px
-    ctx.strokeStyle = '#0a0402';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(x0, y0, w, h);
-
-    ctx.save();
-    ctx.translate(x0, y0);
-    ctx.scale(scale, scale);
-    const iw = entity.width;
-    const ih = entity.height;
-
-    // Wood plank vertical lines every 20px, lighter brown
-    ctx.strokeStyle = '#6b4023';
-    ctx.lineWidth = 1.2;
-    for (let px = 20; px < iw; px += 20) {
-      ctx.beginPath();
-      ctx.moveTo(px, 4);
-      ctx.lineTo(px, ih - 4);
-      ctx.stroke();
-    }
-
-    // Cross-brace X (darker, 2px)
-    ctx.strokeStyle = '#2a1408';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(6, 6); ctx.lineTo(iw - 6, ih - 6);
-    ctx.moveTo(iw - 6, 6); ctx.lineTo(6, ih - 6);
-    ctx.stroke();
-
-    // Top platform — darker rect
-    const platH = ih * 0.18;
-    ctx.fillStyle = '#2a1408';
-    ctx.fillRect(6, 6, iw - 12, platH);
-
-    // 4 archers (red dots, 4px each) on platform
-    ctx.fillStyle = '#cc3333';
-    const archerY = 6 + platH / 2;
-    for (let i = 0; i < 4; i++) {
-      const ax = 12 + i * ((iw - 24) / 3);
-      ctx.beginPath();
-      ctx.arc(ax, archerY, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Wheels — two dark rects on each side, 10×18px
-    ctx.fillStyle = '#0a0402';
-    ctx.fillRect(-5, ih - 22, 10, 18);
-    ctx.fillRect(iw - 5, ih - 22, 10, 18);
-    ctx.fillRect(-5, ih - 44, 10, 18);
-    ctx.fillRect(iw - 5, ih - 44, 10, 18);
-
-    // Scorch marks — larger
-    for (const s of entity.scorchMarks) {
-      ctx.save();
-      ctx.globalAlpha = 0.65;
-      ctx.fillStyle = '#0a0a04';
-      const sr = Math.max(s.r, 10) + 4;
-      ctx.beginPath();
-      ctx.ellipse(s.x, s.y, sr, sr * 0.7, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-    ctx.restore();
-  }
+  ctx.save();
+  if (flashing) ctx.filter = 'brightness(1.8)';
+  renderSiegeTowerFallback(ctx, entity, scale);
+  ctx.restore();
 
   // Smoke (drawn in screen space above the tower)
   if (entity.smoking) {
@@ -773,44 +759,61 @@ function renderEntities(ctx) {
 }
 
 // ============ RENDERING — FALLBACK GRAPHICS ============
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 function renderGround(ctx) {
-  if (USE_SPRITE.mosaic_tile && SPRITES.mosaic_tile) {
-    // Tile the mosaic texture across the battlefield
-    const tile = SPRITES.mosaic_tile;
-    const tileSize = 256;
-    for (let x = 0; x < gameWidth; x += tileSize) {
-      for (let y = 0; y < wallY; y += tileSize) {
-        ctx.drawImage(tile, x, y, tileSize, tileSize);
-      }
+  // Base gradient — warm sand, slightly darker at bottom
+  const grad = ctx.createLinearGradient(0, 0, 0, wallY);
+  grad.addColorStop(0, '#c8a563');
+  grad.addColorStop(0.5, '#b8944e');
+  grad.addColorStop(1, '#a8843e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, gameWidth, wallY);
+
+  // Subtle noise texture — tiny random-colored dots (drawn once to offscreen canvas, then stamped)
+  if (!renderGround._noiseCanvas) {
+    const nc = document.createElement('canvas');
+    nc.width = 200;
+    nc.height = 200;
+    const nctx = nc.getContext('2d');
+    for (let i = 0; i < 3000; i++) {
+      const x = Math.random() * 200;
+      const y = Math.random() * 200;
+      const brightness = 0.85 + Math.random() * 0.3;
+      nctx.fillStyle = `rgba(${Math.floor(160 * brightness)}, ${Math.floor(130 * brightness)}, ${Math.floor(70 * brightness)}, 0.15)`;
+      nctx.fillRect(x, y, 1 + Math.random(), 1 + Math.random());
     }
-    // Subtle warm gradient overlay (lighter top, warmer toward wall)
-    const grad = ctx.createLinearGradient(0, 0, 0, wallY);
-    grad.addColorStop(0, 'rgba(180, 150, 100, 0.15)');
-    grad.addColorStop(1, 'rgba(120, 80, 40, 0.25)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, gameWidth, wallY);
-  } else {
-    // Fallback: deeper golden sand with gradient
-    const grad = ctx.createLinearGradient(0, 0, 0, wallY);
-    grad.addColorStop(0, '#c4a87c');
-    grad.addColorStop(1, '#a8884a');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, gameWidth, wallY);
+    renderGround._noiseCanvas = nc;
   }
-
-  // Sand dune patches — very subtle, just a hint of variation
-  ctx.fillStyle = 'rgba(160, 130, 80, 0.08)';
-  for (const d of decorations.dunes) {
-    ctx.beginPath();
-    ctx.ellipse(d.x, d.y, d.rx, d.ry, 0, 0, Math.PI * 2);
-    ctx.fill();
+  const nc = renderGround._noiseCanvas;
+  ctx.globalAlpha = 0.5;
+  for (let x = 0; x < gameWidth; x += 200) {
+    for (let y = 0; y < wallY; y += 200) {
+      ctx.drawImage(nc, x, y);
+    }
   }
+  ctx.globalAlpha = 1;
 
-  // Tiny scattered rocks — slightly less prominent
-  ctx.fillStyle = 'rgba(74, 40, 8, 0.7)';
-  for (const rock of decorations.rocks) {
+  // A few subtle ground features — very faint darker patches at deterministic positions
+  ctx.fillStyle = 'rgba(120, 90, 40, 0.08)';
+  const patchCount = Math.floor(gameWidth / 200);
+  for (let i = 0; i < patchCount * 2; i++) {
+    const px = (i * 317) % gameWidth;
+    const py = ((i * 541) % (wallY - 100)) + 50;
     ctx.beginPath();
-    ctx.arc(rock.x, rock.y, rock.r, 0, Math.PI * 2);
+    ctx.ellipse(px, py, 40 + (i % 3) * 20, 15 + (i % 2) * 10, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -1131,18 +1134,32 @@ function entityCrumbleColor(entity) {
   return CONFIG.COLORS.SHIELD_RED;
 }
 
+function renderEntityGround(ctx, entity) {
+  const scale = entityScale(entity);
+  const w = entity.width * scale;
+  const h = entity.height * scale;
+
+  // Dark ground patch (NOT a floating shadow) — wider than tall, blends with sand
+  ctx.fillStyle = 'rgba(80, 60, 30, 0.18)';
+  ctx.beginPath();
+  ctx.ellipse(
+    entity.x,
+    entity.y + h * 0.4,
+    w * 0.45,
+    h * 0.08,
+    0, 0, Math.PI * 2
+  );
+  ctx.fill();
+
+  // Tiny disturbed ground marks (footprints / track marks)
+  ctx.fillStyle = 'rgba(80, 60, 30, 0.1)';
+  ctx.fillRect(entity.x - w * 0.2, entity.y + h * 0.35, w * 0.4, 3);
+}
+
 function renderShadows(ctx) {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
   for (const e of state.entities) {
     if (!e.alive || e.crumbling) continue;
-    const scale = entityScale(e);
-    const widthMult = e.type === 'siegeTower' ? 1.5 : 1;
-    const rx = e.width * scale * 0.5 * widthMult;
-    const ry = e.height * scale * 0.15;
-    const cy = e.y + e.height * scale * 0.5 + 4;
-    ctx.beginPath();
-    ctx.ellipse(e.x, cy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
+    renderEntityGround(ctx, e);
   }
 }
 
@@ -1974,11 +1991,6 @@ function updateDefenders(dt) {
 
 function renderDefenders(ctx) {
   for (const d of state.defenders) {
-    if (SPRITES.defender) {
-      ctx.drawImage(SPRITES.defender, d.x - d.width / 2, d.y - d.height / 2, d.width, d.height);
-      continue;
-    }
-
     ctx.save();
     ctx.translate(d.x, d.y);
 
@@ -2842,11 +2854,6 @@ function renderLeaderboardPanel(ctx, b) {
 }
 
 function renderBorderFrame(ctx) {
-  if (SPRITES.borderFrame) {
-    ctx.drawImage(SPRITES.borderFrame, 0, 0, gameWidth, gameHeight);
-    return;
-  }
-
   const bw = 6;
 
   ctx.save();
