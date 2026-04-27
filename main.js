@@ -5,7 +5,7 @@ const CONFIG = {
   BALLISTA_COOLDOWN: 400,
   BOLT_SPEED: 2500,
   LEGIONARY_SPEED: 140, LEGIONARY_HP: 1, LEGIONARY_SQUAD_SIZE: 5,
-  TESTUDO_SPEED: 80, TESTUDO_HP: 3, TESTUDO_WIDTH: 140, TESTUDO_HEIGHT: 110,
+  TESTUDO_SPEED: 80, TESTUDO_HP: 3, TESTUDO_WIDTH: 180, TESTUDO_HEIGHT: 140,
   SIEGE_TOWER_SPEED: 55, SIEGE_TOWER_HP: 5, SIEGE_TOWER_WIDTH: 120, SIEGE_TOWER_HEIGHT: 160,
   LEGIONARY_SCORE: 100, TESTUDO_SCORE: 300, SIEGE_TOWER_SCORE: 500,
   PERFECT_WAVE_BONUS: 200, BOSS_CLEAR_BONUS: 1000,
@@ -392,9 +392,10 @@ function renderLegionarySquad(ctx, entity) {
   if (USE_SPRITE.legionary && SPRITES.legionary) {
     const w = entity.width * scale;
     const h = entity.height * scale;
+    const bob = Math.sin(state.time / 1000 * 6) * 2;
     ctx.save();
     if (flashing) ctx.filter = 'brightness(1.8)';
-    ctx.drawImage(SPRITES.legionary, entity.x - w / 2, entity.y - h / 2, w, h);
+    ctx.drawImage(SPRITES.legionary, entity.x - w / 2, entity.y - h / 2 + bob, w, h);
     ctx.restore();
     return;
   }
@@ -544,14 +545,6 @@ function renderTestudo(ctx, entity) {
     return;
   }
 
-  // Soft shadow
-  ctx.save();
-  ctx.fillStyle = CONFIG.COLORS.SHADOW;
-  ctx.beginPath();
-  ctx.ellipse(entity.x, entity.y + h / 2 + 4, w * 0.5, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
   // Main red shield body — slightly brighter so gold pops
   ctx.fillStyle = flashing ? '#ffb0a0' : '#a83030';
   ctx.fillRect(x0, y0, w, h);
@@ -668,14 +661,6 @@ function renderSiegeTower(ctx, entity) {
     ctx.drawImage(SPRITES.siegeTower, x0, y0, w, h);
     ctx.restore();
   } else {
-    // Shadow
-    ctx.save();
-    ctx.fillStyle = CONFIG.COLORS.SHADOW;
-    ctx.beginPath();
-    ctx.ellipse(entity.x, entity.y + h / 2 + 5, w * 0.55, 7, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
     // Main brown body
     ctx.fillStyle = flashing ? '#d8b078' : '#5a3018';
     ctx.fillRect(x0, y0, w, h);
@@ -1147,15 +1132,14 @@ function entityCrumbleColor(entity) {
 }
 
 function renderShadows(ctx) {
-  if (state.deltaTime > 20) return;
-  ctx.fillStyle = CONFIG.COLORS.SHADOW;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
   for (const e of state.entities) {
     if (!e.alive || e.crumbling) continue;
     const scale = entityScale(e);
-    const sizeMult = e.type === 'siegeTower' ? 1.5 : 1;
-    const rx = e.width * scale * 0.4 * sizeMult;
-    const ry = e.height * scale * 0.15 * sizeMult;
-    const cy = e.y + e.height * scale * 0.5 + 3;
+    const widthMult = e.type === 'siegeTower' ? 1.5 : 1;
+    const rx = e.width * scale * 0.5 * widthMult;
+    const ry = e.height * scale * 0.15;
+    const cy = e.y + e.height * scale * 0.5 + 4;
     ctx.beginPath();
     ctx.ellipse(e.x, cy, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -1169,22 +1153,37 @@ function updateDustTrails(dt) {
     if (e.dustTimer > 0) continue;
     e.dustTimer = CONFIG.DUST_INTERVAL / 1000;
     const scale = entityScale(e);
-    const baseY = e.y + e.height * scale * 0.45;
+    const baseY = e.y + e.height * scale * 0.5;
     if (e.type === 'legionary') {
-      for (const s of e.soldiers) {
+      const count = 2 + Math.floor(Math.random() * 2);
+      const halfW = e.width * scale * 0.35;
+      for (let i = 0; i < count; i++) {
         spawnParticle({
-          x: e.x + s.offsetX,
-          y: e.y + s.offsetY + 6,
-          vx: (Math.random() - 0.5) * 12,
+          x: e.x + (Math.random() - 0.5) * halfW * 2,
+          y: baseY,
+          vx: (Math.random() - 0.5) * 18,
           vy: -3 - Math.random() * 4,
-          life: 0.3 + Math.random() * 0.2,
-          size: 1 + Math.random(),
+          life: 0.4,
+          size: 2 + Math.random(),
           color: CONFIG.COLORS.DUST,
-          alpha: 0.3,
+          alpha: 0.35,
         });
       }
     } else if (e.type === 'testudo') {
-      spawnDust(e.x, baseY);
+      const count = 1 + Math.floor(Math.random() * 2);
+      const halfW = e.width * scale * 0.3;
+      for (let i = 0; i < count; i++) {
+        spawnParticle({
+          x: e.x + (Math.random() - 0.5) * halfW * 2,
+          y: baseY,
+          vx: (Math.random() - 0.5) * 18,
+          vy: -3 - Math.random() * 4,
+          life: 0.4,
+          size: 3 + Math.random(),
+          color: CONFIG.COLORS.DUST,
+          alpha: 0.4,
+        });
+      }
     } else if (e.type === 'siegeTower') {
       const halfW = e.width * scale * 0.35;
       spawnDust(e.x - halfW, baseY);
