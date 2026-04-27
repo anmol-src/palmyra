@@ -159,8 +159,8 @@ const SPRITE_FILES = {
 
 // PNGs with white/checkered backgrounds: force the cleaner code-drawn fallback
 const USE_SPRITE = {
-  legionary: false,
-  testudo: false,
+  legionary: true,
+  testudo: true,
   siegeTower: false,
   wall: false,
   city: false,
@@ -389,19 +389,19 @@ function renderLegionarySquad(ctx, entity) {
   const scale = entityScale(entity);
   const flashing = entity.flashTimer > 0;
 
+  if (USE_SPRITE.legionary && SPRITES.legionary) {
+    const w = entity.width * scale;
+    const h = entity.height * scale;
+    ctx.save();
+    if (flashing) ctx.filter = 'brightness(1.8)';
+    ctx.drawImage(SPRITES.legionary, entity.x - w / 2, entity.y - h / 2, w, h);
+    ctx.restore();
+    return;
+  }
+
   for (const s of entity.soldiers) {
     const sx = entity.x + s.offsetX;
     const sy = entity.y + s.offsetY + (s.renderOffsetY || 0);
-
-    if (USE_SPRITE.legionary && SPRITES.legionary) {
-      const w = entity.width * scale;
-      const h = entity.height * scale;
-      ctx.save();
-      if (flashing) ctx.filter = 'brightness(1.8)';
-      ctx.drawImage(SPRITES.legionary, sx - w / 2, sy - h / 2, w, h);
-      ctx.restore();
-      continue;
-    }
 
     ctx.save();
     ctx.translate(sx, sy);
@@ -2288,72 +2288,72 @@ function updateBallistae(dt) {
 
 function renderBallista(ctx, b) {
   ctx.save();
+  ctx.translate(b.x, b.y);
+
+  const recoilScale = b.recoilTimer > 0 ? 0.85 : 1.0;
+  ctx.scale(recoilScale, recoilScale);
+
+  ctx.fillStyle = '#5a3820';
+  ctx.fillRect(-18, -4, 36, 12);
+  ctx.fillStyle = '#6b4830';
+  ctx.fillRect(-16, -3, 32, 4);
+
+  ctx.strokeStyle = '#3d2414';
+  ctx.lineWidth = 3.5;
   ctx.lineCap = 'round';
 
-  // Recoil: arms shorten and pull inward for ~150ms
-  const recoiling = b.recoilTimer > 0;
-  const armLen = recoiling ? 9 : 14;
-  const armSpread = recoiling ? 9 : 14;
-
-  // Wooden base — rounded rect 28×12, warm dark brown
-  const baseX = b.x - 14;
-  const baseY = b.y - 6;
-  const baseW = 28;
-  const baseH = 12;
-  ctx.fillStyle = '#5a3418';
   ctx.beginPath();
-  if (ctx.roundRect) {
-    ctx.roundRect(baseX, baseY, baseW, baseH, 3);
-  } else {
-    ctx.rect(baseX, baseY, baseW, baseH);
-  }
+  ctx.moveTo(-10, -2);
+  ctx.quadraticCurveTo(-18, -18, -14, -28);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(10, -2);
+  ctx.quadraticCurveTo(18, -18, 14, -28);
+  ctx.stroke();
+
+  ctx.fillStyle = '#888';
+  ctx.beginPath();
+  ctx.arc(-14, -28, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(14, -28, 2.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // Wood grain highlight along the top edge
-  ctx.fillStyle = 'rgba(140, 90, 50, 0.5)';
-  ctx.fillRect(baseX + 2, baseY + 1, baseW - 4, 1.5);
-
-  // Two bow arms — curved from base up-and-out to the tips
-  const pivotY = baseY;
-  const tipLeftX = b.x - armSpread;
-  const tipLeftY = pivotY - armLen;
-  const tipRightX = b.x + armSpread;
-  const tipRightY = pivotY - armLen;
-
-  ctx.strokeStyle = '#3d2010';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  // Left arm: quadratic curve gives a subtle bow shape
-  ctx.moveTo(b.x - 3, pivotY);
-  ctx.quadraticCurveTo(b.x - armSpread * 0.6, pivotY - armLen * 0.4, tipLeftX, tipLeftY);
-  // Right arm
-  ctx.moveTo(b.x + 3, pivotY);
-  ctx.quadraticCurveTo(b.x + armSpread * 0.6, pivotY - armLen * 0.4, tipRightX, tipRightY);
-  ctx.stroke();
-
-  // Bowstring between the two tips
   ctx.strokeStyle = '#8a6a3a';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(tipLeftX, tipLeftY);
-  ctx.lineTo(tipRightX, tipRightY);
+  ctx.moveTo(-14, -28);
+  ctx.lineTo(14, -28);
   ctx.stroke();
 
-  // Loaded bolt — gold line pointing up from center (hidden during recoil)
-  if (!recoiling) {
-    ctx.strokeStyle = '#c4a035';
-    ctx.lineWidth = 1.5;
+  ctx.fillStyle = '#4a2a14';
+  ctx.fillRect(-2, -24, 4, 22);
+
+  if (b.recoilTimer <= 0) {
+    ctx.fillStyle = '#c4a035';
+    ctx.fillRect(-1.5, -30, 3, 14);
     ctx.beginPath();
-    ctx.moveTo(b.x, pivotY - 2);
-    ctx.lineTo(b.x, pivotY - 10);
-    ctx.stroke();
+    ctx.moveTo(0, -34);
+    ctx.lineTo(-3, -30);
+    ctx.lineTo(3, -30);
+    ctx.closePath();
+    ctx.fill();
   }
 
-  // Metal fittings — small dark dots at the arm joints
-  ctx.fillStyle = '#1a0e05';
+  ctx.fillStyle = '#2a1a0a';
   ctx.beginPath();
-  ctx.arc(b.x - 3, pivotY, 1.3, 0, Math.PI * 2);
-  ctx.arc(b.x + 3, pivotY, 1.3, 0, Math.PI * 2);
+  ctx.arc(-20, 4, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(20, 4, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#4a3a2a';
+  ctx.beginPath();
+  ctx.arc(-20, 4, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(20, 4, 2, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -2385,6 +2385,17 @@ function fireBoltFromNearest(targetX, targetY) {
   state.bolts.push(createBolt(nearest.x, nearest.y, targetX, targetY));
   nearest.cooldownUntil = now + CONFIG.BALLISTA_COOLDOWN;
   nearest.recoilTimer = 150;
+  spawnParticle({
+    x: nearest.x,
+    y: nearest.y - 30,
+    size: 4,
+    color: '#ffd700',
+    life: 0.15,
+    alpha: 0.9,
+    growRate: 40,
+    vx: 0,
+    vy: 0,
+  });
   AudioManager.play('fire');
   return true;
 }
