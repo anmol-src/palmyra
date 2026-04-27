@@ -11,7 +11,7 @@ const CONFIG = {
   PERFECT_WAVE_BONUS: 200, BOSS_CLEAR_BONUS: 1000,
   BOB_AMPLITUDE: 2.5, BOB_FREQUENCY: 6, DUST_INTERVAL: 100,
   SHAKE_DECAY: 0.9, SCALE_MIN: 0.7, SCALE_MAX: 1.0,
-  WAVES_PER_LEVEL: 10, WAVE_PAUSE: 2000, MAX_LEVEL: 50, BOSS_INTERVAL: 5,
+  WAVES_PER_LEVEL: 5, WAVE_PAUSE: 2000, MAX_LEVEL: 50, BOSS_INTERVAL: 5,
   TAP_RADIUS_MULTIPLIER: 1.2,
   COLORS: {
     GROUND: '#c4a87c', GROUND_DARK: '#a8884a',
@@ -1269,13 +1269,17 @@ function getLevelConfig(level) {
   }
 
   let legCount, testudoCount, speed;
-  if (level <= 2) {
+  if (level === 1) {
     legCount = 3 + Math.floor(Math.random() * 2);
     testudoCount = 0;
     speed = 1.0;
-  } else if (level <= 4) {
+  } else if (level === 2) {
     legCount = 3 + Math.floor(Math.random() * 2);
     testudoCount = 1;
+    speed = 1.05;
+  } else if (level <= 4) {
+    legCount = 3 + Math.floor(Math.random() * 2);
+    testudoCount = 1 + Math.floor(Math.random() * 2);
     speed = 1.1;
   } else if (level <= 9) {
     legCount = 4 + Math.floor(Math.random() * 2);
